@@ -1,0 +1,79 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.*
+
+# Frontend build output
+dist/
+build/
+.cache/
+.vite/
+
+# Rust and Tauri build output
+target/
+src-tauri/target/
+src-tauri/target/**/data/
+
+# Release artifacts are generated locally and uploaded as GitHub Release assets, not committed.
+release/
+*.msi
+*.exe
+*.dmg
+*.app
+*.deb
+*.rpm
+*.AppImage
+*.zip
+*.7z
+*.tar
+*.tar.gz
+*.tgz
+
+
+# GitHub Wiki is a separate repository clone and must not be committed with the main project.
+# GitHub Wiki 是独立仓库的本地副本，不能随主项目仓库一起提交。
+ClipAnchor.wiki/
+
+# Local project prompt/specification file is for private development reference only.
+# 本地项目提示词/需求文件仅用于私人开发参考，不应提交到主项目仓库。
+ClipAnchor.md
+
+# Portable runtime data must stay local because it may contain private clipboard content.
+data/*
+!data/.gitkeep
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.log
+logs/
+
+# Environment and signing secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+*.cer
+*.crt
+*.mobileprovision
+*.provisionprofile
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+*.swo
+
+# Test and coverage output
+coverage/
+.nyc_output/
+playwright-report/
+test-results/

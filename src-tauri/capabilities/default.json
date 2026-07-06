@@ -1,0 +1,22 @@
+{
+  "identifier": "default",
+  "description": "Main ClipAnchor permissions",
+  "windows": ["*"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-start-resize-dragging",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-is-maximized",
+    "core:window:allow-set-position",
+    "core:event:allow-listen",
+    "core:event:allow-emit",
+    "dialog:default",
+    "opener:default",
+    "shell:default"
+  ]
+}

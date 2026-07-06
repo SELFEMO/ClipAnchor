@@ -1,0 +1,4928 @@
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color-scheme: dark;
+  --blue: #319FFF;
+  --coral: #F4A9AA;
+  --bg: #07090d;
+  --bg-raised: #0c0f14;
+  --panel: rgba(18, 21, 27, .86);
+  --panel-solid: #12151b;
+  --panel-soft: rgba(255, 255, 255, .035);
+  --surface: rgba(255, 255, 255, .055);
+  --surface-hover: rgba(255, 255, 255, .082);
+  --line: rgba(255, 255, 255, .10);
+  --line-strong: rgba(255, 255, 255, .16);
+  --text: #eff4fb;
+  --text-strong: #ffffff;
+  --muted: #8993a3;
+  --muted-soft: #667080;
+  --shadow: rgba(0, 0, 0, .36);
+  --scroll-thumb: rgba(49, 159, 255, .58);
+  --mono: "SFMono-Regular", "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { width: 100%; min-height: 100%; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  overflow: hidden;
+  color: var(--text);
+  background: transparent;
+}
+button, input, select { font: inherit; }
+button { border: 0; cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .45; }
+kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  min-height: 20px;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, .045);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.theme-light {
+  --bg: #f7f8fb;
+  --bg-raised: #ffffff;
+  --panel: rgba(255, 255, 255, .88);
+  --panel-solid: #ffffff;
+  --panel-soft: rgba(8, 14, 24, .035);
+  --surface: rgba(8, 14, 24, .045);
+  --surface-hover: rgba(8, 14, 24, .075);
+  --line: rgba(8, 14, 24, .10);
+  --line-strong: rgba(8, 14, 24, .16);
+  --text: #172033;
+  --text-strong: #07111f;
+  --muted: #667085;
+  --muted-soft: #8a94a6;
+  --shadow: rgba(18, 36, 66, .12);
+  --scroll-thumb: rgba(49, 159, 255, .62);
+  color-scheme: light;
+}
+
+.app-shell {
+  min-height: 100vh;
+  padding: 18px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(49, 159, 255, .16), transparent 34%),
+    radial-gradient(circle at 88% 12%, rgba(244, 169, 170, .10), transparent 28%),
+    linear-gradient(180deg, var(--bg), var(--bg-raised));
+  transition: background .28s ease, color .28s ease;
+}
+.codex-frame {
+  width: min(1260px, calc(100vw - 36px));
+  height: calc(100vh - 36px);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 252px minmax(0, 1fr);
+  gap: 14px;
+}
+.codex-sidebar, .codex-main, .content-surface {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  backdrop-filter: blur(22px) saturate(140%);
+  box-shadow: 0 22px 70px var(--shadow), inset 0 1px 0 rgba(255, 255, 255, .055);
+}
+.codex-sidebar {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  gap: 14px;
+  padding: 14px;
+  border-radius: 24px;
+}
+.codex-main {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 14px;
+  padding: 14px;
+  border-radius: 26px;
+}
+
+.brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 6px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.brand-mark {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--blue), #6cbcff 58%, var(--coral));
+  box-shadow: 0 12px 32px rgba(49, 159, 255, .24);
+}
+.brand-mark img { width: 100%; height: 100%; display: block; border-radius: inherit; object-fit: cover; }
+.brand-lockup strong {
+  display: block;
+  color: var(--text-strong);
+  font-size: 16px;
+  letter-spacing: -.03em;
+}
+.brand-lockup span {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: .10em;
+  text-transform: uppercase;
+}
+.status-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: linear-gradient(180deg, var(--surface), transparent);
+}
+.status-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 700;
+}
+.status-row span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.status-card p { margin: 0; color: var(--muted); font-size: 12px; }
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--muted-soft);
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, .035);
+}
+.status-dot.on { background: #48d597; box-shadow: 0 0 0 4px rgba(72, 213, 151, .14), 0 0 22px rgba(72, 213, 151, .52); }
+
+.rail-tabs {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+}
+.rail-tabs button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 42px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 13px;
+  color: var(--muted);
+  background: transparent;
+  text-align: left;
+  transition: background .18s ease, color .18s ease, border-color .18s ease, transform .18s ease;
+}
+.rail-tabs button:hover { color: var(--text); background: var(--surface); }
+.rail-tabs button.active {
+  color: var(--text-strong);
+  border-color: var(--line-strong);
+  background: linear-gradient(180deg, rgba(49, 159, 255, .13), rgba(255, 255, 255, .045));
+  box-shadow: inset 3px 0 0 var(--blue);
+}
+.rail-tabs span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 700; }
+.sidebar-footer {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.shortcut-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.shortcut-hint span { width: 100%; margin-top: 3px; }
+.icon-button, .icon-action, .soft-button, .pill-action, .primary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--text);
+  background: var(--surface);
+  transition: transform .16s ease, box-shadow .16s ease, background .16s ease, border-color .16s ease, color .16s ease;
+}
+.icon-button { width: 100%; height: 42px; }
+.icon-button:hover, .soft-button:hover, .pill-action:hover, .primary-button:hover, .icon-action:hover {
+  transform: translateY(-1px);
+  border-color: rgba(49, 159, 255, .42);
+  background: var(--surface-hover);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .18);
+}
+.primary-button, .pill-action {
+  color: #fff;
+  border-color: rgba(49, 159, 255, .58);
+  background: linear-gradient(180deg, #3aa5ff, #1c76ce);
+  box-shadow: 0 12px 28px rgba(49, 159, 255, .18);
+}
+.soft-button { min-height: 38px; padding: 9px 13px; }
+
+.workspace-header {
+  min-height: 116px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+  gap: 18px;
+  align-items: stretch;
+  padding: 8px 4px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.title-block { min-width: 0; align-self: center; }
+.eyebrow {
+  margin: 0 0 8px;
+  color: var(--blue);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+h1 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: clamp(28px, 3.5vw, 44px);
+  line-height: 1.05;
+  letter-spacing: -.055em;
+}
+.page-subtitle {
+  max-width: 760px;
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+.command-capsule {
+  align-self: center;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 54px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  color: var(--muted);
+  background: linear-gradient(180deg, rgba(255, 255, 255, .055), rgba(255, 255, 255, .025));
+}
+.command-capsule span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-family: var(--mono); font-size: 12px; }
+.content-surface {
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 20px;
+}
+
+.scroll-area {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color .24s ease;
+}
+.scroll-area:hover { scrollbar-color: var(--scroll-thumb) transparent; }
+.scroll-area::-webkit-scrollbar { width: 6px; height: 6px; }
+.scroll-area::-webkit-scrollbar-track { background: transparent; }
+.scroll-area::-webkit-scrollbar-thumb { border-radius: 999px; background: transparent; transition: background .24s ease; }
+.scroll-area:hover::-webkit-scrollbar-thumb { background: var(--scroll-thumb); }
+
+.clipboard-pane, .settings-scroll {
+  height: 100%;
+  overflow: auto;
+  padding: 18px;
+}
+.clipboard-pane { display: grid; align-content: start; gap: 14px; }
+.clipboard-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background:
+    linear-gradient(90deg, rgba(49, 159, 255, .12), transparent 55%),
+    linear-gradient(180deg, var(--surface), rgba(255, 255, 255, .018));
+}
+.clipboard-hero h2 { margin: 0; color: var(--text-strong); font-size: 20px; letter-spacing: -.035em; }
+.metric-grid { display: grid; grid-template-columns: repeat(3, minmax(96px, 1fr)); gap: 8px; }
+.metric-card {
+  min-width: 96px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .036);
+}
+.metric-card strong { display: block; color: var(--text-strong); font-family: var(--mono); font-size: 18px; letter-spacing: -.04em; }
+.metric-card span { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.metric-card.coral { background: linear-gradient(180deg, rgba(244, 169, 170, .09), rgba(255, 255, 255, .028)); }
+.metric-card.ghosted { background: linear-gradient(180deg, rgba(49, 159, 255, .09), rgba(255, 255, 255, .028)); }
+
+.toolbar {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, .028);
+}
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--muted);
+  background: rgba(0, 0, 0, .10);
+}
+.search-box input { border: 0; background: transparent; padding: 0; color: var(--text); outline: none; }
+.filter-chips, .segmented {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, .10);
+}
+.filter-chips button, .segmented button {
+  min-height: 32px;
+  padding: 7px 10px;
+  border-radius: 9px;
+  color: var(--muted);
+  background: transparent;
+  transition: color .16s ease, background .16s ease;
+}
+.filter-chips button:hover, .segmented button:hover { color: var(--text); background: var(--surface); }
+.filter-chips button.active, .segmented button.active { color: var(--text-strong); background: rgba(49, 159, 255, .18); box-shadow: inset 0 0 0 1px rgba(49, 159, 255, .25); }
+
+.history-list { display: grid; gap: 14px; }
+.history-group { display: grid; gap: 8px; }
+.history-group h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 3px 2px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.history-item {
+  display: grid;
+  grid-template-columns: 24px 40px 54px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .047), rgba(255, 255, 255, .022));
+  transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease, background .16s ease;
+}
+.history-item:hover {
+  transform: translateY(-1px);
+  border-color: rgba(49, 159, 255, .42);
+  background: linear-gradient(180deg, rgba(49, 159, 255, .08), rgba(255, 255, 255, .028));
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .18);
+}
+.history-item.favorite { border-color: rgba(49, 159, 255, .30); background: linear-gradient(90deg, rgba(49, 159, 255, .12), rgba(244, 169, 170, .055)); }
+.select-dot { display: grid; place-items: center; }
+.select-dot input { display: none; }
+.select-dot span {
+  width: 15px;
+  height: 15px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, .025);
+  transition: background .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+.select-dot input:checked + span { border-color: var(--blue); background: var(--blue); box-shadow: 0 0 0 4px rgba(49, 159, 255, .16); }
+.record-icon, .thumb {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--blue);
+  background: rgba(49, 159, 255, .10);
+}
+.thumb { width: 54px; height: 44px; object-fit: cover; color: var(--muted); background: rgba(255, 255, 255, .035); }
+.record-main { min-width: 0; display: grid; gap: 4px; }
+.record-main strong { color: var(--text-strong); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 14px; }
+.record-main span { color: var(--muted); font-family: var(--mono); font-size: 11px; }
+.record-actions { display: inline-flex; align-items: center; gap: 6px; }
+.icon-action { width: 34px; height: 34px; color: var(--muted); border-radius: 10px; }
+.icon-action.active { color: #fff; border-color: rgba(49, 159, 255, .40); background: rgba(49, 159, 255, .40); }
+.pill-action { min-height: 34px; padding: 8px 11px; border-radius: 10px; }
+.empty-state {
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  min-height: 150px;
+  color: var(--muted);
+  border: 1px dashed var(--line-strong);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, .025);
+}
+.empty-state strong { color: var(--text-strong); }
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(2, 6, 16, .58);
+  backdrop-filter: blur(18px) saturate(130%);
+}
+.text-record-modal {
+  width: min(680px, 100%);
+  border: 1px solid var(--line-strong);
+  border-radius: 22px;
+  padding: 18px;
+  background: linear-gradient(180deg, rgba(22, 27, 36, .96), rgba(12, 17, 26, .98));
+  box-shadow: 0 28px 80px rgba(0, 0, 0, .48), inset 0 1px 0 rgba(255, 255, 255, .08);
+}
+.modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+.modal-head h2 {
+  margin: 3px 0 0;
+  color: var(--text-strong);
+  font-size: 21px;
+  letter-spacing: -.035em;
+}
+.text-record-editor {
+  width: 100%;
+  min-height: 220px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px;
+  color: var(--text);
+  background: rgba(0, 0, 0, .20);
+  outline: none;
+  font: 13px/1.65 var(--mono);
+}
+.text-record-editor:focus {
+  border-color: rgba(49, 159, 255, .58);
+  box-shadow: 0 0 0 4px rgba(49, 159, 255, .12);
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding-bottom: 8px;
+}
+.settings-card {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .048), rgba(255, 255, 255, .022));
+}
+.settings-card.wide { grid-column: 1 / -1; }
+.settings-card h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 7px;
+  color: var(--text-strong);
+  font-size: 16px;
+  letter-spacing: -.025em;
+}
+.settings-card p { margin: 0 0 14px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+.setting-stack { display: grid; gap: 8px; }
+.settings-card label {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(160px, 1.2fr);
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.settings-card label.vertical { grid-template-columns: 1fr; align-items: stretch; gap: 7px; }
+.switch {
+  justify-self: end;
+  position: relative;
+  width: 46px;
+  height: 26px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .08);
+  transition: background .16s ease, border-color .16s ease;
+}
+.switch span {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--text-strong);
+  box-shadow: 0 5px 12px rgba(0, 0, 0, .22);
+  transform: translateX(0);
+  transition: transform .18s ease;
+}
+.switch.on { border-color: rgba(49, 159, 255, .55); background: rgba(49, 159, 255, .34); }
+.switch.on span { transform: translateX(20px); }
+.range-grid, .shortcut-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.shortcut-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.range-grid label, .shortcut-grid label {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, .08);
+}
+input, select {
+  width: 100%;
+  min-height: 38px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  color: var(--text);
+  background: rgba(0, 0, 0, .12);
+  outline: none;
+}
+.theme-light input, .theme-light select, .theme-light .search-box, .theme-light .filter-chips, .theme-light .segmented { background: rgba(8, 14, 24, .035); }
+input:focus, select:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(49, 159, 255, .15); }
+input[type="range"] { min-height: auto; padding: 0; accent-color: var(--blue); }
+.conflict { border-color: var(--coral); box-shadow: 0 0 0 3px rgba(244, 169, 170, .16); }
+.button-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 9px 0; }
+.danger-line { color: var(--coral); border-color: rgba(244, 169, 170, .34); background: rgba(244, 169, 170, .07); }
+.danger.strong { color: #fff; border-color: rgba(244, 169, 170, .36); background: linear-gradient(180deg, rgba(244, 169, 170, .80), rgba(163, 67, 80, .72)); }
+
+.boot-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 14px;
+  color: #fff;
+  background: #07090d;
+}
+.boot-screen p { margin: 0; font-size: 22px; font-weight: 900; letter-spacing: -.05em; }
+.boot-orbit { position: relative; width: 78px; height: 78px; display: grid; place-items: center; }
+.boot-orbit span { position: absolute; inset: 0; border-radius: 18px; background: linear-gradient(135deg, var(--blue), var(--coral)); filter: blur(12px); opacity: .55; animation: float 3s ease-in-out infinite; }
+
+.popup-shell {
+  width: 100vw;
+  height: 100vh;
+  padding: 0;
+  color: var(--text);
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  contain: layout paint size;
+}
+.popup-card {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  border: 0;
+  border-radius: 22px;
+  background: var(--panel);
+  backdrop-filter: blur(18px) saturate(140%);
+  box-shadow: none;
+  transition: transform .22s ease;
+}
+.popup-glow { display: none; }
+.popup-shell.pinned .popup-card { cursor: grab; box-shadow: none; }
+.popup-content { position: relative; z-index: 1; height: calc(100% - 50px); display: grid; align-content: start; gap: 8px; padding: 16px; overflow: hidden; }
+.popup-meta { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-family: var(--mono); font-size: 11px; font-weight: 700; }
+.popup-meta span { display: inline-flex; align-items: center; gap: 6px; }
+.popup-meta b { color: var(--blue); }
+.popup-content img { width: 100%; height: 90px; object-fit: cover; border-radius: 12px; border: 1px solid var(--line); }
+.popup-content strong { color: var(--text-strong); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.popup-content p { margin: 0; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.45; font-size: 13px; }
+.popup-text-body {
+  min-height: 72px;
+  color: var(--text-strong);
+  font-size: 13px;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.popup-actions { position: relative; z-index: 2; max-height: 0; transform: translateY(18px); opacity: 0; padding: 0 16px; transition: max-height .20s ease, transform .20s ease, opacity .20s ease, padding .20s ease; }
+.actions-visible .popup-actions { max-height: 56px; transform: translateY(0); opacity: 1; padding: 0 16px 14px; }
+.popup-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 38px; border-radius: 12px; border: 1px solid var(--line); color: var(--text); background: var(--surface); }
+.popup-loading-card, .popup-error-card { display: grid; align-content: center; }
+.popup-error-card { box-shadow: none; }
+.pin-button { width: 100%; color: #fff !important; border-color: rgba(49, 159, 255, .58) !important; background: linear-gradient(180deg, #3aa5ff, #1c76ce) !important; }
+.split-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; animation: split .18s ease both; }
+
+.position-overlay { min-height: 100vh; position: relative; overflow: hidden; background: rgba(7, 9, 13, .66); backdrop-filter: blur(14px); }
+.position-grid { position: absolute; inset: 0; opacity: .10; background-image: linear-gradient(rgba(255,255,255,.6) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.6) 1px, transparent 1px); background-size: 32px 32px; }
+.mock-popup { position: absolute; width: 318px; height: 160px; display: grid; align-content: center; gap: 9px; padding: 22px; border-radius: 18px; border: 1px solid rgba(49, 159, 255, .38); color: #fff; background: linear-gradient(180deg, rgba(18, 21, 27, .96), rgba(13, 17, 23, .94)); box-shadow: 0 0 0 1px rgba(49, 159, 255, .18), 0 24px 70px rgba(0,0,0,.36); cursor: grab; }
+.mock-popup span { display: inline-flex; align-items: center; gap: 8px; color: #9fb0c7; font-family: var(--mono); font-size: 12px; }
+.mock-popup strong { font-size: 23px; letter-spacing: -.04em; }
+.mock-popup p { margin: 0; color: #96a0b2; }
+.position-panel { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); display: flex; gap: 10px; padding: 10px; border-radius: 16px; background: rgba(18, 21, 27, .88); border: 1px solid rgba(255,255,255,.12); box-shadow: 0 22px 70px rgba(0,0,0,.32); }
+
+.inline-position-editor {
+  position: fixed;
+  inset: 18px;
+  z-index: 90;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 24px;
+  background: rgba(7, 9, 13, .78);
+  backdrop-filter: blur(18px) saturate(140%);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, .45), inset 0 1px 0 rgba(255, 255, 255, .08);
+}
+.theme-light .inline-position-editor {
+  background: rgba(247, 248, 251, .82);
+  box-shadow: 0 30px 90px rgba(18, 36, 66, .22), inset 0 1px 0 rgba(255, 255, 255, .72);
+}
+.inline-position-grid {
+  position: absolute;
+  inset: 0;
+  opacity: .12;
+  background-image: linear-gradient(var(--text) 1px, transparent 1px), linear-gradient(90deg, var(--text) 1px, transparent 1px);
+  background-size: 32px 32px;
+  pointer-events: none;
+}
+.position-close {
+  position: absolute;
+  right: 16px;
+  top: 16px;
+  z-index: 3;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--text);
+  background: var(--panel);
+}
+.inline-mock-popup {
+  position: absolute;
+  width: 318px;
+  height: 170px;
+  z-index: 2;
+  display: grid;
+  align-content: center;
+  gap: 9px;
+  padding: 22px;
+  border-radius: 18px;
+  border: 1px solid rgba(49, 159, 255, .42);
+  color: var(--text);
+  background: var(--panel);
+  box-shadow: 0 0 0 1px rgba(49, 159, 255, .18), 0 24px 70px rgba(0,0,0,.36);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.inline-mock-popup:active { cursor: grabbing; }
+.inline-mock-popup span { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-family: var(--mono); font-size: 12px; }
+.inline-mock-popup strong { color: var(--text-strong); font-size: 23px; letter-spacing: -.04em; }
+.inline-mock-popup p { margin: 0; color: var(--muted); }
+.inline-mock-popup small { color: var(--blue); font-family: var(--mono); font-weight: 800; }
+.inline-position-panel {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  z-index: 3;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: 0 22px 70px rgba(0,0,0,.32);
+}
+
+.scale-small { font-size: 14px; }
+.scale-medium { font-size: 16px; }
+.scale-large { font-size: 18px; }
+.motion-performance *, .motion-performance *::before, .motion-performance *::after { animation: none !important; transition-duration: .08s !important; }
+@keyframes float { 50% { transform: translateY(-8px); } }
+@keyframes split { from { transform: scaleX(.76); opacity: .45; } to { transform: scaleX(1); opacity: 1; } }
+
+@media (max-width: 980px) {
+  .app-shell { padding: 12px; }
+  .codex-frame { width: calc(100vw - 24px); height: calc(100vh - 24px); grid-template-columns: 1fr; }
+  .codex-sidebar { grid-template-rows: auto auto auto; }
+  .rail-tabs { grid-template-columns: 1fr 1fr; }
+  .sidebar-footer { display: none; }
+  .workspace-header { grid-template-columns: 1fr; }
+  .command-capsule { display: none; }
+  .toolbar, .clipboard-hero, .settings-grid, .range-grid, .shortcut-grid { grid-template-columns: 1fr; }
+  .metric-grid { grid-template-columns: repeat(3, 1fr); }
+  .history-item { grid-template-columns: 24px 40px minmax(0, 1fr); }
+  .thumb { display: none; }
+  .record-actions { grid-column: 1 / -1; justify-content: flex-end; }
+}
+
+@media (max-width: 640px) {
+  .brand-lockup span, .status-card { display: none; }
+  .codex-main, .codex-sidebar { padding: 10px; border-radius: 18px; }
+  h1 { font-size: 28px; }
+  .workspace-header { min-height: 0; }
+  .clipboard-pane, .settings-scroll { padding: 12px; }
+  .metric-grid { grid-template-columns: 1fr; }
+  .filter-chips { overflow-x: auto; justify-content: flex-start; }
+  .settings-card label { grid-template-columns: 1fr; }
+  .switch { justify-self: start; }
+}
+
+
+.desktop-position-overlay {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: #07090f;
+  color: #f6f8ff;
+  user-select: none;
+}
+
+.desktop-preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: saturate(.78) brightness(.62) blur(.5px);
+  transform: scale(1.002);
+}
+
+.desktop-dim {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 22% 18%, rgba(49, 159, 255, .22), transparent 28%),
+    radial-gradient(circle at 76% 74%, rgba(244, 169, 170, .18), transparent 30%),
+    rgba(3, 5, 12, .38);
+}
+
+.desktop-mock-popup {
+  position: absolute;
+  z-index: 5;
+  cursor: grab;
+  box-shadow: 0 26px 80px rgba(0, 0, 0, .42), 0 0 0 1px rgba(255, 255, 255, .14), 0 0 36px rgba(49, 159, 255, .28);
+}
+
+.desktop-mock-popup:active {
+  cursor: grabbing;
+}
+
+.desktop-position-panel {
+  z-index: 6;
+  border: 1px solid rgba(255, 255, 255, .14);
+  background: rgba(12, 16, 26, .78);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .38);
+  backdrop-filter: blur(18px);
+}
+
+
+/* Safe non-exclusive popup position workbench */
+.position-workbench-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 16px;
+  padding: 18px;
+  color: #f6f8ff;
+  background:
+    radial-gradient(circle at 12% 10%, rgba(49, 159, 255, .16), transparent 28%),
+    radial-gradient(circle at 88% 76%, rgba(244, 169, 170, .10), transparent 32%),
+    #07090f;
+  overflow: hidden;
+}
+
+.position-workbench-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border: 1px solid rgba(255, 255, 255, .10);
+  border-radius: 20px;
+  background: rgba(12, 16, 24, .84);
+  box-shadow: 0 16px 50px rgba(0, 0, 0, .25);
+}
+
+.position-workbench-header h1 {
+  margin: 3px 0 4px;
+  font-size: 26px;
+  letter-spacing: -.04em;
+}
+
+.position-workbench-header p {
+  margin: 0;
+  color: #9ca8ba;
+}
+
+.position-workbench-body {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 16px;
+}
+
+.monitor-preview-card, .position-inspector {
+  min-height: 0;
+  border: 1px solid rgba(255, 255, 255, .10);
+  border-radius: 22px;
+  background: rgba(12, 16, 24, .72);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .28);
+  overflow: hidden;
+}
+
+.monitor-preview-card {
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+.monitor-preview-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
+  color: #b8c4d6;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.monitor-preview-toolbar span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.monitor-preview-toolbar small {
+  color: #6f7b8f;
+}
+
+.monitor-preview-canvas {
+  position: relative;
+  align-self: center;
+  justify-self: center;
+  width: min(100%, calc((100vh - 174px) * 1.777));
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: #05070c;
+  border-radius: 0 0 20px 20px;
+}
+
+.safe-mock-popup {
+  width: 250px;
+  height: 132px;
+  padding: 16px;
+  gap: 6px;
+  touch-action: none;
+  user-select: none;
+}
+
+.safe-mock-popup strong {
+  font-size: 20px;
+}
+
+.safe-mock-popup p {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 12px;
+}
+
+.position-inspector {
+  padding: 16px;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.position-inspector strong {
+  color: #f6f8ff;
+  font-size: 15px;
+}
+
+.position-inspector p {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  color: #9ca8ba;
+  background: rgba(255, 255, 255, .055);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.position-inspector b {
+  color: #319FFF;
+}
+
+.position-inspector small {
+  color: #778397;
+  line-height: 1.55;
+}
+
+.safe-position-panel {
+  position: static;
+  transform: none;
+  display: grid;
+  margin-top: 4px;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  box-shadow: none;
+}
+
+.safe-position-panel button {
+  width: 100%;
+}
+
+@media (max-width: 860px) {
+  .position-workbench-body {
+    grid-template-columns: 1fr;
+  }
+  .position-inspector {
+    grid-template-columns: 1fr 1fr;
+  }
+  .position-inspector strong,
+  .position-inspector small,
+  .safe-position-panel {
+    grid-column: 1 / -1;
+  }
+}
+
+
+/* Safe in-window position map: no extra WebView, no fullscreen overlay, no desktop capture. */
+.position-card {
+  min-height: 420px;
+}
+
+.position-map-card {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.02));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+}
+
+.theme-light .position-map-card {
+  border-color: rgba(15, 23, 42, .08);
+  background: linear-gradient(180deg, rgba(255,255,255,.92), rgba(246,249,255,.78));
+}
+
+.position-map-copy {
+  display: grid;
+  gap: 5px;
+}
+
+.position-map-copy strong {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.position-map-copy span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.position-map-canvas {
+  position: relative;
+  height: 245px;
+  overflow: hidden;
+  border-radius: 16px;
+  cursor: crosshair;
+  user-select: none;
+  touch-action: none;
+  border: 1px solid rgba(49,159,255,.20);
+  background:
+    radial-gradient(circle at 12% 16%, rgba(49,159,255,.22), transparent 28%),
+    radial-gradient(circle at 88% 78%, rgba(244,169,170,.14), transparent 24%),
+    linear-gradient(145deg, rgba(10,14,22,.94), rgba(16,22,32,.96));
+}
+
+.theme-light .position-map-canvas {
+  border-color: rgba(49,159,255,.22);
+  background:
+    radial-gradient(circle at 12% 16%, rgba(49,159,255,.16), transparent 28%),
+    radial-gradient(circle at 88% 78%, rgba(244,169,170,.16), transparent 24%),
+    linear-gradient(145deg, rgba(245,248,255,.96), rgba(229,237,250,.95));
+}
+
+.position-map-grid {
+  position: absolute;
+  inset: 0;
+  opacity: .22;
+  background-image:
+    linear-gradient(rgba(255,255,255,.28) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.28) 1px, transparent 1px);
+  background-size: 36px 36px;
+}
+
+.theme-light .position-map-grid {
+  opacity: .55;
+  background-image:
+    linear-gradient(rgba(49,159,255,.13) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(49,159,255,.13) 1px, transparent 1px);
+}
+
+.position-map-safe-area {
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+  border: 1px dashed rgba(49,159,255,.34);
+  background: rgba(49,159,255,.025);
+  pointer-events: none;
+}
+
+.position-map-axis {
+  position: absolute;
+  z-index: 1;
+  padding: 4px 7px;
+  border-radius: 999px;
+  color: rgba(210, 224, 245, .72);
+  background: rgba(7, 11, 18, .52);
+  border: 1px solid rgba(255, 255, 255, .08);
+  font-family: var(--mono);
+  font-size: 10px;
+  pointer-events: none;
+}
+
+.position-map-axis.x-axis {
+  right: 10px;
+  top: 10px;
+}
+
+.position-map-axis.y-axis {
+  left: 10px;
+  bottom: 10px;
+}
+
+.theme-light .position-map-axis {
+  color: rgba(51, 65, 85, .76);
+  background: rgba(255, 255, 255, .68);
+  border-color: rgba(15, 23, 42, .08);
+}
+
+.position-map-popup {
+  position: absolute;
+  width: var(--mock-popup-width, 128px);
+  height: var(--mock-popup-height, 76px);
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding: 10px;
+  border-radius: 14px;
+  transform: translate3d(0,0,0);
+  border: 1px solid rgba(49,159,255,.55);
+  color: #eef7ff;
+  background: linear-gradient(180deg, rgba(16,23,35,.98), rgba(7,11,18,.96));
+  box-shadow: 0 18px 44px rgba(0,0,0,.34), 0 0 0 1px rgba(49,159,255,.18), 0 0 28px rgba(49,159,255,.20);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.theme-light .position-map-popup {
+  color: #0f172a;
+  background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(239,246,255,.96));
+  box-shadow: 0 18px 44px rgba(31,78,121,.16), 0 0 0 1px rgba(49,159,255,.16), 0 0 28px rgba(49,159,255,.16);
+}
+
+.position-map-popup b {
+  font-size: 12px;
+  letter-spacing: .02em;
+}
+
+.position-map-popup span {
+  font-size: 9px;
+  line-height: 1.25;
+  opacity: .72;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.position-map-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.position-map-footer code {
+  padding: 7px 10px;
+  border-radius: 10px;
+  color: var(--muted);
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.08);
+}
+
+.theme-light .position-map-footer code {
+  background: rgba(15,23,42,.04);
+  border-color: rgba(15,23,42,.08);
+}
+
+.compact-actions {
+  margin: 0;
+}
+
+@media (max-width: 780px) {
+  .position-map-canvas { height: 200px; }
+  .position-map-footer { align-items: stretch; }
+  .compact-actions { width: 100%; }
+}
+
+/* Refined settings layout fixes */
+.codex-frame {
+  font-size: calc(16px * var(--ui-scale, 1));
+}
+
+.refined-settings-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.runtime-card,
+.popup-size-card,
+.full-data-card {
+  grid-column: 1 / -1;
+}
+
+.runtime-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.popup-size-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.full-data-card {
+  min-height: auto;
+}
+
+.data-actions-layout {
+  display: grid;
+  gap: 8px;
+}
+
+.danger-actions {
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.position-map-copy span,
+.popup-size-card p,
+.runtime-card p,
+.accent-card p {
+  max-width: 760px;
+}
+
+@media (max-width: 900px) {
+  .runtime-grid,
+  .popup-size-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/* Settings refinement: safer scaling, compact controls, and tooltip help */
+.compact-settings-grid {
+  grid-template-columns: 1fr;
+  max-width: 980px;
+  margin: 0 auto;
+}
+
+.compact-settings-grid .settings-card {
+  padding: 15px;
+}
+
+.compact-settings-grid .settings-card h2 {
+  margin-bottom: 12px;
+}
+
+.compact-settings-grid .settings-card > p {
+  display: none;
+}
+
+.service-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: grid;
+}
+
+.setting-row,
+.control-row {
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, .07);
+}
+
+.theme-light .setting-row,
+.theme-light .control-row {
+  background: rgba(15, 23, 42, .035);
+}
+
+.setting-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.setting-name > span:first-child {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.help-tip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--muted);
+  background: var(--surface);
+  cursor: help;
+}
+
+.help-tip:hover,
+.help-tip:focus-visible {
+  color: var(--blue);
+  border-color: rgba(49, 159, 255, .45);
+  outline: none;
+}
+
+.help-bubble {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  z-index: 30;
+  width: min(260px, 70vw);
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  color: var(--text);
+  background: var(--panel-solid);
+  box-shadow: 0 18px 50px var(--shadow);
+  transform: translateX(-50%) translateY(4px);
+  opacity: 0;
+  pointer-events: none;
+  white-space: normal;
+  line-height: 1.5;
+  font-size: 12px;
+  font-weight: 600;
+  transition: opacity .16s ease, transform .16s ease;
+}
+
+.help-tip:hover .help-bubble,
+.help-tip:focus-visible .help-bubble {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.appearance-controls {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.appearance-controls .control-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+}
+
+.appearance-controls .segmented {
+  width: max-content;
+  max-width: 100%;
+  justify-self: end;
+  padding: 3px;
+}
+
+.appearance-controls .segmented button {
+  min-width: 76px;
+  padding: 7px 11px;
+  white-space: nowrap;
+}
+
+.runtime-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.stepper-control {
+  display: inline-grid;
+  grid-template-columns: 34px minmax(74px, auto) 34px;
+  align-items: center;
+  justify-content: start;
+  gap: 6px;
+}
+
+.stepper-control button {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  background: var(--surface);
+}
+
+.stepper-control strong {
+  min-width: 70px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text-strong);
+  background: rgba(0, 0, 0, .10);
+  text-align: center;
+  font-family: var(--mono);
+}
+
+.theme-light .stepper-control strong {
+  background: rgba(15, 23, 42, .04);
+}
+
+.data-actions-main,
+.compact-danger-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.compact-danger-actions {
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.compact-danger-actions .soft-button {
+  min-height: 36px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.force-clear {
+  color: var(--coral);
+  border-color: rgba(244, 169, 170, .34);
+  background: rgba(244, 169, 170, .07);
+  box-shadow: none;
+}
+
+.danger.strong {
+  color: var(--coral);
+  border-color: rgba(244, 169, 170, .34);
+  background: rgba(244, 169, 170, .07);
+  box-shadow: none;
+}
+
+.codex-frame {
+  font-size: calc(16px * var(--ui-scale, 1));
+}
+
+.codex-frame :where(button, input, select, .settings-card label, .settings-card p, .record-main strong, .record-main span, .filter-chips button, .segmented button, .page-subtitle) {
+  font-size: 0.875em;
+}
+
+.codex-frame h1 {
+  font-size: clamp(28px, calc(2.75em * var(--ui-scale, 1)), 46px);
+}
+
+.motion-elegant .codex-frame::before {
+  content: "";
+  position: absolute;
+  inset: -20%;
+  pointer-events: none;
+  background: radial-gradient(circle at 18% 12%, rgba(49,159,255,.10), transparent 25%), radial-gradient(circle at 82% 78%, rgba(244,169,170,.075), transparent 24%);
+  animation: elegant-breathe 8s ease-in-out infinite;
+}
+
+.motion-elegant .history-item,
+.motion-elegant .settings-card,
+.motion-elegant .popup-card {
+  animation: elegant-rise .28s ease both;
+}
+
+.motion-elegant .primary-button,
+.motion-elegant .pill-action,
+.motion-elegant .pin-button {
+  position: relative;
+  overflow: hidden;
+}
+
+.motion-elegant .primary-button::after,
+.motion-elegant .pill-action::after,
+.motion-elegant .pin-button::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent, rgba(255,255,255,.22), transparent);
+  transform: translateX(-120%);
+  animation: elegant-sheen 4.6s ease-in-out infinite;
+}
+
+@keyframes elegant-breathe {
+  0%, 100% { transform: translate3d(0,0,0) scale(1); opacity: .65; }
+  50% { transform: translate3d(1.5%, -1%, 0) scale(1.03); opacity: 1; }
+}
+
+@keyframes elegant-rise {
+  from { opacity: .86; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes elegant-sheen {
+  0%, 72% { transform: translateX(-120%); }
+  100% { transform: translateX(120%); }
+}
+
+@media (max-width: 900px) {
+  .service-grid,
+  .runtime-grid,
+  .popup-size-grid {
+    grid-template-columns: 1fr;
+  }
+  .appearance-controls .control-row {
+    grid-template-columns: 1fr;
+  }
+  .appearance-controls .segmented {
+    justify-self: start;
+    width: 100%;
+  }
+}
+.codex-frame { position: relative; }
+.compact-title-help {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Targeted UI cleanup after settings review */
+.sidebar-action-row {
+  display: flex;
+  gap: 8px;
+}
+.square-icon-button {
+  width: 38px;
+  height: 38px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--text);
+  background: var(--surface);
+  transition: transform .16s ease, box-shadow .16s ease, background .16s ease, border-color .16s ease;
+}
+.square-icon-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(49, 159, 255, .42);
+  background: var(--surface-hover);
+  box-shadow: 0 14px 34px rgba(0,0,0,.18);
+}
+.setting-row {
+  display: flex !important;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.setting-row .setting-name { flex: 1 1 auto; }
+.setting-row .switch { flex: 0 0 auto; }
+.appearance-controls {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.appearance-controls .control-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: start;
+  gap: 9px;
+  min-height: 86px;
+}
+.appearance-controls .segmented {
+  justify-self: start;
+  width: auto;
+  max-width: 100%;
+}
+.appearance-controls .segmented button {
+  min-width: 64px;
+  padding-inline: 10px;
+}
+.help-bubble {
+  left: 0;
+  right: auto;
+  bottom: calc(100% + 8px);
+  transform: translateY(4px);
+}
+.help-tip:hover .help-bubble,
+.help-tip:focus-visible .help-bubble {
+  transform: translateY(0);
+}
+.service-grid .help-bubble,
+.appearance-controls .help-bubble,
+.runtime-grid .help-bubble,
+.popup-size-grid .help-bubble {
+  width: min(240px, 62vw);
+}
+.runtime-grid,
+.popup-size-grid {
+  gap: 10px;
+}
+.runtime-grid label,
+.popup-size-grid label,
+.shortcut-grid label {
+  min-height: 0;
+}
+.data-actions-layout {
+  gap: 10px;
+}
+.data-actions-main {
+  margin-bottom: 0;
+}
+.compact-danger-actions {
+  margin-top: 2px;
+}
+.compact-danger-actions .soft-button,
+.data-actions-main .soft-button {
+  min-width: 132px;
+  height: 38px;
+}
+@media (max-width: 980px) {
+  .appearance-controls { grid-template-columns: 1fr; }
+  .appearance-controls .control-row { min-height: auto; }
+}
+
+
+/* Clipboard market layout refinements */
+.clipboard-market { padding: 16px; }
+.clipboard-workbench {
+  min-height: 100%;
+  display: grid;
+  grid-template-columns: minmax(210px, 260px) minmax(0, 1fr);
+  gap: 14px;
+}
+.clip-collections {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  display: grid;
+  gap: 12px;
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255,255,255,.052), rgba(255,255,255,.024));
+}
+.clip-collections h2 { margin: 0; color: var(--text-strong); font-size: 20px; letter-spacing: -.04em; }
+.market-search { min-height: 38px; }
+.collection-list { display: grid; gap: 6px; }
+.collection-list button {
+  min-height: 38px;
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  color: var(--muted);
+  background: transparent;
+}
+.collection-list button:hover { color: var(--text); background: rgba(255,255,255,.045); }
+.collection-list button.active { color: var(--text-strong); background: rgba(49,159,255,.16); box-shadow: inset 0 0 0 1px rgba(49,159,255,.25); }
+.collection-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.collection-stats div { min-width: 0; padding: 8px; border: 1px solid var(--line); border-radius: 12px; background: rgba(0,0,0,.08); }
+.collection-stats strong { display: block; color: var(--text-strong); font-family: var(--mono); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.collection-stats span { display: block; color: var(--muted); font-size: 10px; margin-top: 3px; }
+.collection-actions { display: grid; gap: 8px; }
+.history-feed { min-width: 0; display: grid; align-content: start; gap: 14px; }
+.market-history-item {
+  grid-template-columns: 24px 62px minmax(0, 1fr) auto;
+  padding: 12px;
+}
+.market-history-item .record-main { gap: 3px; }
+.market-history-item .record-main span { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: 12px; font-family: var(--font); }
+.market-history-item .record-main small { color: var(--muted); opacity: .72; font-family: var(--mono); font-size: 10px; }
+.file-thumb, .file-thumb-stack { width: 58px; height: 48px; border-radius: 14px; }
+.file-thumb-stack {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  gap: 2px;
+  overflow: hidden;
+  padding: 3px;
+}
+.file-thumb-stack span { min-width: 0; min-height: 0; display: grid; place-items: center; border-radius: 8px; background: rgba(49,159,255,.10); color: var(--blue); overflow: hidden; }
+.file-thumb-stack img { width: 100%; height: 100%; object-fit: cover; }
+.file-thumb-stack.has-images { background: rgba(255,255,255,.04); }
+
+/* Popup close and file object previews */
+.popup-meta-actions { display: inline-flex; align-items: center; gap: 7px; }
+.popup-close { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 7px; color: var(--muted); background: rgba(255,255,255,.055); border: 1px solid var(--line); }
+.popup-close:hover { color: var(--text-strong); background: rgba(244,169,170,.15); border-color: rgba(244,169,170,.35); }
+.unpinned-actions { grid-template-columns: 1.35fr .85fr; }
+.popup-file-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; min-height: 72px; }
+.popup-file-grid:not(.multi) { grid-template-columns: 1fr; }
+.popup-file-tile { min-width: 0; display: grid; grid-template-columns: 42px minmax(0, 1fr); align-items: center; gap: 8px; padding: 7px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.035); }
+.popup-file-tile span, .popup-file-tile img { width: 42px; height: 36px; display: grid; place-items: center; border-radius: 9px; object-fit: cover; color: var(--blue); background: rgba(49,159,255,.10); }
+.popup-file-tile em { min-width: 0; color: var(--text-strong); font-style: normal; font-size: 12px; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 980px) {
+  .clipboard-workbench { grid-template-columns: 1fr; }
+  .clip-collections { position: static; }
+  .collection-list { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .collection-list button { grid-template-columns: 1fr; justify-items: center; }
+  .collection-list button svg { display: none; }
+}
+
+@media (max-width: 760px) {
+  .market-history-item { grid-template-columns: 24px 52px minmax(0, 1fr); }
+  .market-history-item .record-actions { grid-column: 2 / -1; justify-content: flex-start; }
+}
+
+/* Clipboard list rollback and stable media previews */
+.compact-history-toolbar { grid-template-columns: minmax(240px, 1fr) auto auto auto; }
+.compact-history-list { gap: 12px; }
+.compact-history-item {
+  grid-template-columns: 24px 40px 56px minmax(0, 1fr) auto;
+  min-height: 68px;
+}
+.compact-history-item .record-main { gap: 3px; }
+.compact-history-item .record-main span {
+  max-width: min(560px, 100%);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-family: var(--font);
+  font-size: 12px;
+}
+.compact-history-item .record-main small {
+  color: var(--muted);
+  opacity: .72;
+  font-family: var(--mono);
+  font-size: 10px;
+}
+.file-kind-thumb {
+  position: relative;
+  display: grid;
+  place-items: center;
+  color: var(--blue);
+  background: rgba(49, 159, 255, .10);
+}
+.file-kind-thumb.image-file { color: #7ab8ff; background: linear-gradient(135deg, rgba(49,159,255,.16), rgba(244,169,170,.10)); }
+.file-kind-thumb small {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  min-width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  padding: 0 5px;
+  border-radius: 999px;
+  color: #fff;
+  background: var(--blue);
+  border: 2px solid var(--panel);
+  font: 800 10px/1 var(--mono);
+}
+.popup-file-list {
+  display: grid;
+  gap: 6px;
+  min-height: 0;
+}
+.popup-file-list.multi { grid-template-columns: 1fr 1fr; }
+.popup-file-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255,255,255,.035);
+}
+.popup-file-row span,
+.popup-file-row img {
+  width: 36px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  object-fit: cover;
+  color: var(--blue);
+  background: rgba(49,159,255,.10);
+}
+.popup-file-row em {
+  min-width: 0;
+  color: var(--text-strong);
+  font-style: normal;
+  font-size: 12px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.popup-file-summary {
+  font-size: 12px;
+  color: var(--muted) !important;
+  opacity: .86;
+}
+.popup-content > img {
+  max-height: 96px;
+  object-fit: contain;
+  background: rgba(0,0,0,.12);
+}
+@media (max-width: 760px) {
+  .compact-history-toolbar { grid-template-columns: 1fr; }
+  .compact-history-item { grid-template-columns: 24px 44px minmax(0, 1fr); }
+  .compact-history-item .record-icon { display: none; }
+  .compact-history-item .record-actions { grid-column: 2 / -1; justify-content: flex-start; }
+}
+
+/* Native shell refinements */
+.native-titlebar {
+  height: 38px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  padding: 0 10px 0 14px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.02));
+  user-select: none;
+}
+.native-titlebar-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .02em;
+}
+.native-titlebar-brand img { width: 16px; height: 16px; border-radius: 5px; object-fit: cover; }
+.native-titlebar-brand span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.native-window-controls { display: inline-flex; align-items: center; height: 100%; }
+.native-window-controls button {
+  width: 42px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--muted);
+  background: transparent;
+  transition: background .16s ease, color .16s ease;
+}
+.native-window-controls button:hover { color: var(--text-strong); background: var(--surface-hover); }
+.native-window-controls .close-control:hover { color: #fff; background: rgba(239, 68, 68, .86); }
+.app-shell {
+  display: grid;
+  grid-template-rows: 38px minmax(0, 1fr);
+  padding: 0;
+}
+.codex-frame {
+  width: 100%;
+  height: calc(100vh - 38px);
+  margin: 0;
+  padding: 14px;
+  grid-template-columns: minmax(236px, 252px) minmax(0, 1fr);
+}
+.codex-sidebar, .codex-main { min-height: 0; }
+h1 { font-size: clamp(26px, 3vw, 38px); }
+.workspace-header { min-height: 104px; }
+.theme-light .text-record-modal {
+  color: var(--text);
+  background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(244,247,251,.98));
+  box-shadow: 0 28px 80px rgba(18, 36, 66, .20), inset 0 1px 0 rgba(255,255,255,.72);
+}
+.theme-light .modal-backdrop { background: rgba(238, 242, 249, .66); }
+.theme-light .text-record-editor {
+  color: var(--text);
+  background: rgba(8, 14, 24, .035);
+}
+.danger-icon { color: var(--coral); }
+.danger-icon:hover { border-color: rgba(244, 169, 170, .48); background: rgba(244, 169, 170, .11); color: var(--coral); }
+
+@media (min-width: 1500px) {
+  .codex-frame { grid-template-columns: 268px minmax(0, 1fr); }
+  .codex-main { padding: 18px; }
+  .clipboard-pane, .settings-scroll { padding: 22px; }
+}
+
+@media (max-width: 760px) {
+  .native-titlebar { padding-left: 10px; }
+  .native-window-controls button { width: 36px; }
+  .codex-frame { padding: 10px; height: calc(100vh - 38px); }
+}
+
+/* Settings refinements for sizing, data usage, and native titlebar interactions */
+.native-titlebar {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+.native-titlebar-drag {
+  height: 100%;
+  min-width: 24px;
+}
+.native-window-controls,
+.native-window-controls button {
+  -webkit-app-region: no-drag;
+}
+.sidebar-action-row-split {
+  justify-content: space-between;
+  gap: 12px;
+}
+.sidebar-left-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.danger-exit:hover {
+  color: #fff;
+  border-color: rgba(244, 169, 170, .50);
+  background: rgba(244, 169, 170, .18);
+}
+.service-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.service-grid .setting-row {
+  min-height: 54px;
+}
+.sizing-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.stepper-control {
+  justify-content: flex-end;
+  gap: 6px;
+}
+.stepper-control .reset-stepper {
+  width: 30px;
+  min-width: 30px;
+  opacity: .78;
+}
+.data-summary-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+.data-summary-strip strong {
+  color: var(--text-strong);
+  font-family: var(--mono);
+}
+.history-limit-row {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-soft);
+}
+.position-map-canvas {
+  height: auto;
+  min-height: 260px;
+  max-height: 430px;
+}
+.popup-pinned-actions {
+  grid-template-columns: repeat(auto-fit, minmax(76px, 1fr));
+}
+.popup-editor-overlay {
+  position: absolute;
+  inset: 12px;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 18px;
+  border: 1px solid var(--line-strong);
+  background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+  backdrop-filter: blur(16px);
+  box-shadow: var(--shadow-xl);
+  z-index: 5;
+}
+.popup-editor-overlay textarea {
+  width: 100%;
+  min-height: 0;
+  resize: none;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  padding: 10px;
+  color: var(--text-strong);
+  background: var(--surface-soft);
+  outline: none;
+}
+.popup-editor-overlay div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.popup-editor-overlay button {
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  color: var(--text);
+}
+@media (max-width: 1050px) {
+  .service-grid, .sizing-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .service-grid, .sizing-grid { grid-template-columns: 1fr; }
+}
+
+/* Focused layout fixes for history, settings, and safe popup-position map. */
+.two-row-toolbar {
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+.toolbar-search-row {
+  width: 100%;
+  min-width: 0;
+}
+.toolbar-search-row input { width: 100%; }
+.toolbar-action-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.toolbar-action-row .filter-chips {
+  flex: 0 0 auto;
+}
+.toolbar-action-row .soft-button {
+  min-height: 36px;
+  white-space: nowrap;
+}
+.toolbar-action-row .danger-line {
+  margin-left: auto;
+}
+.compact-history-list .history-item {
+  grid-template-columns: 24px 38px 54px minmax(0, 1fr) auto;
+}
+.compact-history-item .record-main strong {
+  max-width: min(620px, 100%);
+  font-size: 13px;
+  line-height: 1.25;
+}
+.compact-history-item .record-main span:empty { display: none; }
+.compact-history-item .record-main small {
+  margin-top: 1px;
+}
+.record-actions { flex-shrink: 0; }
+
+.settings-scroll {
+  overflow-x: hidden;
+}
+.settings-card label.scale-step-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+}
+.settings-card label.scale-step-row .setting-name {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.stepper-control {
+  flex: 0 0 auto;
+  justify-self: end;
+  width: auto;
+}
+.runtime-grid.sizing-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+}
+.runtime-grid.sizing-grid > label {
+  min-height: 72px;
+}
+.runtime-grid.sizing-grid > label:not(.scale-step-row) {
+  padding-top: 11px;
+}
+.position-map-card {
+  overflow: hidden;
+}
+.position-map-canvas {
+  width: 100%;
+  min-height: 0;
+  max-height: none;
+  height: auto;
+  box-sizing: border-box;
+}
+.position-map-footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+.position-map-footer code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.full-data-card .data-summary-strip,
+.full-data-card .history-limit-row {
+  min-height: 0;
+  margin: 8px 0;
+  padding: 10px 12px;
+}
+.full-data-card .history-limit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.full-data-card .data-actions-layout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+}
+.full-data-card .button-row {
+  margin: 0;
+}
+.full-data-card .danger-actions {
+  border-top: 0;
+  padding-top: 0;
+}
+.full-data-card .danger-actions .soft-button {
+  min-width: 128px;
+}
+
+@media (max-width: 980px) {
+  .runtime-grid.sizing-grid { grid-template-columns: 1fr; }
+  .position-map-footer { grid-template-columns: 1fr; }
+  .toolbar-action-row .danger-line { margin-left: 0; }
+}
+
+/* Final interaction and layout polish */
+.floating-back-top {
+  position: sticky;
+  left: calc(100% - 48px);
+  bottom: 18px;
+  z-index: 30;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  margin-left: auto;
+  margin-top: -52px;
+  border: 1px solid rgba(49, 159, 255, .36);
+  border-radius: 13px;
+  color: var(--text-strong);
+  background: linear-gradient(180deg, rgba(49, 159, 255, .22), rgba(255, 255, 255, .055));
+  box-shadow: 0 14px 34px rgba(49, 159, 255, .18), var(--shadow-md);
+}
+.floating-back-top:hover {
+  transform: translateY(-1px);
+  border-color: rgba(49, 159, 255, .58);
+  background: linear-gradient(180deg, rgba(49, 159, 255, .32), rgba(255, 255, 255, .08));
+}
+
+/* Scale controls must stay on one line; empty stretch areas are removed by letting labels fit their content. */
+.runtime-grid.sizing-grid {
+  grid-template-columns: repeat(2, minmax(330px, 1fr));
+}
+.settings-card label.scale-step-row {
+  display: grid !important;
+  grid-template-columns: minmax(126px, 1fr) max-content;
+  align-items: center;
+  min-height: 60px !important;
+  gap: 12px;
+}
+.stepper-control {
+  display: inline-grid !important;
+  grid-template-columns: 34px 72px 34px 34px;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.stepper-control button,
+.stepper-control .reset-stepper {
+  width: 34px !important;
+  min-width: 34px !important;
+  height: 34px;
+  flex: 0 0 auto;
+}
+.stepper-control strong {
+  width: 72px;
+  min-width: 72px;
+  box-sizing: border-box;
+}
+
+/* Data management rows should read like compact settings, not oversized empty panels. */
+.history-limit-row {
+  display: grid !important;
+  grid-template-columns: minmax(150px, 1fr) max-content;
+  align-items: center;
+  min-height: 58px;
+  margin: 10px 0 !important;
+  padding: 10px 12px !important;
+}
+.data-actions-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+.data-actions-layout .button-row { margin: 0; }
+.compact-danger-actions { justify-content: flex-end; border-top: 0 !important; padding-top: 0 !important; }
+
+/* The safe map now labels and sizes the same usable boundary that is saved to settings. */
+.position-map-card { padding-right: 0; }
+.position-map-canvas {
+  width: 100%;
+  max-width: 100%;
+  min-height: 240px;
+  max-height: none;
+}
+.position-map-axis.x-axis,
+.position-map-axis.y-axis {
+  font-family: var(--mono);
+  max-width: calc(100% - 22px);
+}
+.position-map-footer {
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  gap: 10px;
+}
+.position-map-footer code { max-width: 100%; }
+
+/* Window-control buttons must never inherit drag behavior from the titlebar. */
+.native-window-controls,
+.native-window-controls * {
+  pointer-events: auto;
+  -webkit-user-drag: none;
+  user-select: none;
+}
+.native-titlebar-brand { cursor: default; }
+.native-titlebar-drag { cursor: default; }
+
+@media (max-width: 1120px) {
+  .runtime-grid.sizing-grid { grid-template-columns: 1fr; }
+  .data-actions-layout { grid-template-columns: 1fr; }
+  .compact-danger-actions { justify-content: flex-start; }
+}
+
+/* Final popup action compaction: icon-only edit/favorite keep Copy and Unpin on the first row. */
+.popup-pinned-actions {
+  grid-template-columns: repeat(2, 38px) minmax(72px, 1fr) minmax(78px, 1fr) !important;
+  align-items: center;
+}
+.popup-pinned-actions .icon-only {
+  width: 38px;
+  padding: 0;
+  gap: 0;
+}
+.popup-pinned-actions button {
+  min-width: 0;
+  white-space: nowrap;
+}
+.popup-pinned-actions button svg { flex: 0 0 auto; }
+
+/* Final safe-position map padding fix: the canvas now respects equal left/right gutters inside its card. */
+.position-map-card {
+  padding: 14px !important;
+  box-sizing: border-box;
+}
+.position-map-canvas {
+  width: 100% !important;
+  margin-inline: 0 !important;
+  box-sizing: border-box;
+}
+.position-map-axis.x-axis { right: 12px; }
+.position-map-axis.y-axis { left: 12px; }
+
+/* Final titlebar hit-test fix: only the middle strip is draggable, buttons are always above it. */
+.native-titlebar {
+  grid-template-columns: auto minmax(24px, 1fr) auto !important;
+}
+.native-titlebar-drag {
+  height: 100%;
+  min-width: 24px;
+  -webkit-app-region: drag;
+}
+.native-window-controls {
+  position: relative;
+  z-index: 20;
+  -webkit-app-region: no-drag;
+}
+.native-window-controls button {
+  position: relative;
+  z-index: 21;
+  -webkit-app-region: no-drag;
+}
+
+/* Favorite deletion now uses an in-app confirmation surface instead of a native Windows alert, preserving the app's custom shell language. */
+/* 收藏删除改为软件内确认层，避免原生 Windows 弹窗破坏自绘窗口的一致性。 */
+.native-confirm-backdrop {
+  background: color-mix(in srgb, var(--bg) 68%, transparent);
+  backdrop-filter: blur(18px) saturate(120%);
+}
+.native-confirm-modal {
+  width: min(430px, calc(100vw - 42px));
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px solid var(--line-strong);
+  color: var(--text);
+  background: var(--panel);
+  box-shadow: var(--shadow-xl), inset 0 1px 0 rgba(255,255,255,.06);
+}
+.native-confirm-icon {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 15%, transparent);
+}
+.native-confirm-copy { min-width: 0; display: grid; gap: 6px; }
+.native-confirm-copy strong { color: var(--text-strong); font-size: 16px; letter-spacing: -.03em; }
+.native-confirm-copy p { margin: 0; color: var(--muted); line-height: 1.55; }
+.native-confirm-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 6px;
+}
+.danger-button {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 16px;
+  border-radius: 12px;
+  color: var(--coral);
+  border: 1px solid color-mix(in srgb, var(--coral) 42%, transparent);
+  background: color-mix(in srgb, var(--coral) 11%, transparent);
+}
+.danger-button:hover { color: #fff; background: color-mix(in srgb, var(--coral) 72%, #1b1f2a 28%); }
+
+/* The clipboard feed keeps favorite items visible; favorite state is a badge-like protection, not a move operation. */
+/* 剪贴板列表中保留收藏记录，收藏只是保护状态，不再让记录从历史流中消失。 */
+.compact-history-item.favorite .record-main strong::after {
+  content: '★';
+  margin-left: 8px;
+  color: var(--blue);
+  font-size: 12px;
+  vertical-align: 1px;
+}
+
+/* Stable non-transparent popup windows cannot draw real outside shadows, so the frame uses inner depth and removes the black outer gutter. */
+/* 稳定的非透明弹窗无法绘制真正外部阴影，因此改用内侧层次并移除黑色外框留白。 */
+.popup-shell {
+  padding: 0 !important;
+  background: var(--panel) !important;
+}
+.popup-card {
+  border-radius: 0 !important;
+  border: 0 !important;
+  box-shadow: inset 0 0 0 1px var(--line-strong), inset 0 1px 0 rgba(255,255,255,.06) !important;
+}
+.popup-glow { opacity: .42; }
+.popup-shell.pinned .popup-card {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 44%, transparent), inset 0 0 32px color-mix(in srgb, var(--blue) 14%, transparent) !important;
+}
+.popup-error-card { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--coral) 44%, transparent) !important; }
+
+/* Media popups do not have an edit button, so they use a three-column action layout instead of reserving an empty slot. */
+/* 非文本弹窗没有编辑按钮，因此使用三列按钮布局，不再保留空位导致按钮错行。 */
+.popup-pinned-actions.text-actions {
+  grid-template-columns: 38px 38px minmax(72px, 1fr) minmax(78px, 1fr) !important;
+}
+.popup-pinned-actions.media-actions {
+  grid-template-columns: 38px minmax(74px, 1fr) minmax(82px, 1fr) !important;
+}
+.popup-pinned-actions .icon-only {
+  width: 38px;
+  min-width: 38px;
+  padding: 0;
+}
+
+/* Popup visual polish and resizable pinned state */
+/* 弹窗使用透明无边框窗口承载圆角与外部阴影，因为用户需要看到真正的悬浮卡片而不是方形外框。 */
+/* Popups use transparent borderless windows for real rounded corners and outer shadow, because users need a floating card rather than a square frame. */
+.popup-shell {
+  padding: 12px !important;
+  background: transparent !important;
+  overflow: hidden !important;
+}
+.popup-card {
+  border-radius: 24px !important;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 78%, transparent) !important;
+  background: color-mix(in srgb, var(--panel-solid) 92%, transparent) !important;
+  box-shadow:
+    0 26px 64px rgba(0, 0, 0, .42),
+    0 10px 26px rgba(0, 0, 0, .22),
+    0 0 0 1px rgba(255, 255, 255, .055),
+    inset 0 1px 0 rgba(255, 255, 255, .10) !important;
+}
+.theme-light .popup-card {
+  background: color-mix(in srgb, #ffffff 94%, transparent) !important;
+  box-shadow:
+    0 30px 72px rgba(18, 36, 66, .22),
+    0 12px 32px rgba(18, 36, 66, .14),
+    0 0 0 1px rgba(8, 14, 24, .045),
+    inset 0 1px 0 rgba(255, 255, 255, .85) !important;
+}
+.popup-shell.pinned .popup-card {
+  border-color: color-mix(in srgb, var(--blue) 42%, var(--line-strong)) !important;
+  box-shadow:
+    0 30px 74px rgba(0, 0, 0, .46),
+    0 0 0 1px color-mix(in srgb, var(--blue) 34%, transparent),
+    0 0 38px color-mix(in srgb, var(--blue) 28%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, .10) !important;
+}
+.theme-light .popup-shell.pinned .popup-card {
+  box-shadow:
+    0 32px 78px rgba(18, 36, 66, .24),
+    0 0 0 1px color-mix(in srgb, var(--blue) 32%, transparent),
+    0 0 38px color-mix(in srgb, var(--blue) 22%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, .82) !important;
+}
+.popup-shell.pinned .popup-card::after {
+  content: '';
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 14px;
+  height: 14px;
+  opacity: .42;
+  background:
+    linear-gradient(135deg, transparent 50%, color-mix(in srgb, var(--blue) 70%, transparent) 50%) right bottom / 7px 7px no-repeat,
+    linear-gradient(135deg, transparent 50%, color-mix(in srgb, var(--blue) 42%, transparent) 50%) right bottom / 13px 13px no-repeat;
+  pointer-events: none;
+}
+.popup-meta-actions {
+  gap: 6px !important;
+  flex-shrink: 0;
+}
+.popup-close {
+  width: 24px !important;
+  height: 24px !important;
+  min-width: 24px !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 9px !important;
+  line-height: 1 !important;
+}
+.popup-close svg {
+  display: block;
+  margin: 0;
+}
+.popup-content {
+  padding: 14px 14px 10px !important;
+}
+.actions-visible .popup-actions {
+  padding: 0 12px 12px !important;
+}
+
+/* Latest popup sizing and sensitive-filter UI refinements. */
+/* 最新弹窗尺寸与敏感过滤控件优化。 */
+.setting-row-segmented {
+  grid-template-columns: minmax(120px, auto) max-content !important;
+  gap: 12px !important;
+}
+.setting-row-segmented .segmented {
+  width: max-content;
+  min-width: 0;
+}
+.setting-row-segmented .segmented button {
+  min-width: 56px;
+  padding-inline: 12px;
+}
+
+/* The transparent window keeps a small gutter only for shadow; the custom resize handle lives on the card corner, not on that gutter. */
+/* 透明窗口只保留少量阴影边距，自绘缩放角标固定在卡片右下角，而不是窗口阴影边缘。 */
+.popup-shell {
+  padding: 8px !important;
+  background: transparent !important;
+}
+.popup-card {
+  border-radius: 26px !important;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 52%, transparent) !important;
+  box-shadow:
+    0 28px 66px rgba(0, 0, 0, .34),
+    0 14px 28px rgba(0, 0, 0, .16),
+    inset 0 1px 0 rgba(255, 255, 255, .12) !important;
+}
+.theme-light .popup-card {
+  box-shadow:
+    0 30px 68px rgba(18, 36, 66, .18),
+    0 14px 30px rgba(18, 36, 66, .10),
+    inset 0 1px 0 rgba(255, 255, 255, .92) !important;
+}
+.popup-shell.pinned .popup-card {
+  box-shadow:
+    0 30px 70px rgba(0, 0, 0, .38),
+    0 0 34px color-mix(in srgb, var(--blue) 24%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--blue) 30%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, .12) !important;
+}
+.theme-light .popup-shell.pinned .popup-card {
+  box-shadow:
+    0 32px 72px rgba(18, 36, 66, .20),
+    0 0 32px color-mix(in srgb, var(--blue) 18%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--blue) 24%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, .88) !important;
+}
+.popup-shell.pinned .popup-card::after { display: none !important; }
+.popup-resize-handle {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 5;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 9px;
+  cursor: nwse-resize;
+  background:
+    linear-gradient(135deg, transparent 54%, color-mix(in srgb, var(--blue) 76%, transparent) 54%) right bottom / 9px 9px no-repeat,
+    linear-gradient(135deg, transparent 54%, color-mix(in srgb, var(--blue) 42%, transparent) 54%) right bottom / 16px 16px no-repeat,
+    color-mix(in srgb, var(--surface) 86%, transparent);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.popup-resize-handle:hover {
+  background-color: color-mix(in srgb, var(--blue) 15%, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 45%, transparent);
+}
+.compact-popup-actions .popup-action-text {
+  display: none;
+}
+.compact-popup-actions .popup-actions button {
+  min-width: 38px;
+  padding-inline: 0;
+  gap: 0;
+}
+.compact-popup-actions .popup-pinned-actions.text-actions {
+  grid-template-columns: repeat(4, 38px) !important;
+  justify-content: center;
+}
+.compact-popup-actions .popup-pinned-actions.media-actions {
+  grid-template-columns: repeat(3, 38px) !important;
+  justify-content: center;
+}
+.compact-popup-actions .unpinned-actions {
+  grid-template-columns: repeat(2, 38px) !important;
+  justify-content: center;
+}
+
+
+/* Final sensitive-filter layout, popup shadow, and resize-handle cleanup. */
+/* 最终修正敏感过滤布局、弹窗阴影和缩放角标，避免控件挤压与圆形角标误导。 */
+.privacy-filter-row {
+  grid-column: span 2;
+  grid-template-columns: max-content max-content !important;
+  justify-content: space-between;
+  overflow: visible;
+}
+.privacy-filter-row .setting-name > span {
+  max-width: none;
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+}
+.privacy-filter-row .segmented {
+  max-width: none;
+}
+.privacy-filter-row .segmented button {
+  min-width: 58px;
+  padding-inline: 12px;
+}
+
+.popup-shell {
+  padding: 14px !important;
+  background: transparent !important;
+  overflow: visible !important;
+}
+.popup-card {
+  border: 0 !important;
+  border-radius: 28px !important;
+  box-shadow:
+    0 34px 88px rgba(0, 0, 0, .46),
+    0 16px 34px rgba(0, 0, 0, .24),
+    inset 0 1px 0 rgba(255, 255, 255, .10) !important;
+}
+.theme-light .popup-card {
+  border: 0 !important;
+  box-shadow:
+    0 34px 90px rgba(18, 36, 66, .24),
+    0 16px 36px rgba(18, 36, 66, .15),
+    inset 0 1px 0 rgba(255, 255, 255, .90) !important;
+}
+.popup-shell.pinned .popup-card {
+  border: 0 !important;
+  box-shadow:
+    0 36px 92px rgba(0, 0, 0, .48),
+    0 0 42px color-mix(in srgb, var(--blue) 26%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--blue) 24%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, .10) !important;
+}
+.theme-light .popup-shell.pinned .popup-card {
+  box-shadow:
+    0 36px 94px rgba(18, 36, 66, .24),
+    0 0 36px color-mix(in srgb, var(--blue) 18%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--blue) 18%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, .88) !important;
+}
+.popup-resize-handle {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  cursor: nwse-resize;
+  opacity: .42;
+}
+.popup-resize-handle::before {
+  content: '';
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 12px;
+  height: 12px;
+  background:
+    linear-gradient(135deg, transparent 47%, color-mix(in srgb, var(--blue) 64%, transparent) 48%, color-mix(in srgb, var(--blue) 64%, transparent) 54%, transparent 55%) 4px 4px / 8px 8px no-repeat,
+    linear-gradient(135deg, transparent 47%, color-mix(in srgb, var(--blue) 36%, transparent) 48%, color-mix(in srgb, var(--blue) 36%, transparent) 54%, transparent 55%) 0 0 / 12px 12px no-repeat;
+}
+.popup-resize-handle:hover {
+  opacity: .9;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+@media (max-width: 960px) {
+  .privacy-filter-row { grid-column: 1 / -1; }
+}
+
+/* Final UI polish: native-feeling settings, in-app notices, text-selection cleanup, and softer popup shadows. */
+/* 这组覆盖样式用于修正设置区布局、替换系统弹窗、禁用网页式文本选中，并让弹窗阴影只向外发散而不是形成硬框。 */
+.app-shell,
+.popup-shell,
+.native-titlebar,
+.codex-sidebar,
+.codex-main,
+.content-surface,
+.settings-card,
+.history-card,
+.market-history-item,
+button,
+label,
+.segmented,
+.filter-chips,
+.command-capsule {
+  -webkit-user-select: none;
+  user-select: none;
+}
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+h1 {
+  font-size: clamp(24px, 2.65vw, 34px) !important;
+  line-height: 1.08;
+}
+.page-subtitle {
+  font-size: 13px !important;
+  line-height: 1.5;
+}
+.workspace-header {
+  min-height: 94px !important;
+}
+
+.service-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  align-items: stretch;
+}
+.service-grid .setting-row {
+  min-width: 0;
+}
+.service-grid .privacy-filter-row {
+  grid-column: span 2;
+  grid-template-columns: minmax(86px, auto) max-content !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.service-grid .privacy-filter-row .segmented {
+  justify-self: end;
+  width: auto;
+  max-width: 250px;
+  grid-template-columns: repeat(3, minmax(50px, auto));
+}
+.service-grid .privacy-filter-row .segmented button {
+  min-width: 50px;
+  padding-inline: 10px;
+}
+@media (max-width: 1100px) {
+  .service-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .service-grid .privacy-filter-row { grid-column: 1 / -1; }
+}
+@media (max-width: 720px) {
+  .service-grid { grid-template-columns: 1fr !important; }
+  .service-grid .privacy-filter-row { grid-template-columns: 1fr !important; }
+  .service-grid .privacy-filter-row .segmented { justify-self: stretch; max-width: none; }
+}
+
+.soft-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--bg) 46%, transparent);
+  backdrop-filter: blur(12px) saturate(130%);
+}
+.soft-modal-card {
+  width: min(420px, calc(100vw - 48px));
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+  border-radius: 22px;
+  border: 1px solid var(--line);
+  color: var(--text);
+  background: color-mix(in srgb, var(--panel-solid) 94%, transparent);
+  box-shadow: 0 28px 80px var(--shadow), inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent);
+}
+.soft-modal-card strong {
+  color: var(--text-strong);
+  font-size: 18px;
+  letter-spacing: -.03em;
+}
+.soft-modal-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.soft-modal-card .primary-button {
+  justify-self: end;
+  min-width: 96px;
+}
+.theme-light .soft-modal-card {
+  background: rgba(255, 255, 255, .96);
+  box-shadow: 0 28px 80px rgba(18, 36, 66, .18), inset 0 1px 0 rgba(255, 255, 255, .82);
+}
+
+.popup-shell {
+  padding: 18px !important;
+  background: transparent !important;
+  overflow: visible !important;
+}
+.popup-card {
+  border: 0 !important;
+  outline: 0 !important;
+  border-radius: 30px !important;
+  background-clip: border-box;
+  box-shadow:
+    0 34px 92px rgba(0, 0, 0, .44),
+    0 12px 32px rgba(0, 0, 0, .22) !important;
+}
+.theme-light .popup-card {
+  box-shadow:
+    0 34px 92px rgba(18, 36, 66, .22),
+    0 14px 34px rgba(18, 36, 66, .14) !important;
+}
+.popup-shell.pinned .popup-card {
+  border: 0 !important;
+  box-shadow:
+    0 36px 96px rgba(0, 0, 0, .44),
+    0 0 50px color-mix(in srgb, var(--blue) 28%, transparent) !important;
+}
+.theme-light .popup-shell.pinned .popup-card {
+  box-shadow:
+    0 36px 96px rgba(18, 36, 66, .23),
+    0 0 48px color-mix(in srgb, var(--blue) 18%, transparent) !important;
+}
+.popup-card::before,
+.popup-card::after {
+  display: none !important;
+}
+.popup-resize-handle {
+  right: 14px !important;
+  bottom: 14px !important;
+  width: 24px !important;
+  height: 24px !important;
+  opacity: .28;
+}
+.popup-resize-handle:hover { opacity: .78; }
+
+/* Final requested popup shell cleanup and history import/export layout. */
+/* 最终移除弹窗外层夹层，并让导入导出按钮使用紧凑的格式化布局。 */
+.popup-shell {
+  padding: 0 !important;
+  background: transparent !important;
+  overflow: hidden !important;
+}
+.popup-card {
+  width: 100% !important;
+  height: 100% !important;
+  border-radius: 24px !important;
+  border: 0 !important;
+  background: var(--panel-solid) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.12), inset 0 0 0 1px color-mix(in srgb, var(--line-strong) 72%, transparent) !important;
+}
+.theme-light .popup-card {
+  background: #fff !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.92), inset 0 0 0 1px rgba(8,14,24,.09) !important;
+}
+.popup-shell.pinned .popup-card {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 34%, transparent), inset 0 0 34px color-mix(in srgb, var(--blue) 12%, transparent) !important;
+}
+.theme-light .popup-shell.pinned .popup-card {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 28%, transparent), inset 0 0 34px color-mix(in srgb, var(--blue) 9%, transparent) !important;
+}
+.popup-glow { display: none !important; }
+.popup-actions button {
+  box-sizing: border-box;
+  padding-inline: 13px;
+  white-space: nowrap;
+}
+.popup-pinned-actions button:last-child,
+.unpinned-actions button:last-child {
+  padding-inline: 14px !important;
+}
+.popup-resize-handle {
+  right: 5px !important;
+  bottom: 5px !important;
+  width: 22px !important;
+  height: 22px !important;
+  opacity: .34;
+}
+.import-export-actions {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.import-export-actions .soft-button {
+  min-width: 128px;
+}
+
+/* Pinned-popup ESC confirmation card */
+/* 已置顶弹窗按 Esc 时不直接关闭，而是在右侧展开确认卡片，避免误触丢失用户主动保留的内容。 */
+.popup-unpin-confirm {
+  position: absolute;
+  z-index: 8;
+  top: 10px;
+  right: 10px;
+  bottom: 10px;
+  width: min(190px, calc(100% - 20px));
+  display: grid;
+  align-content: center;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  color: var(--text);
+  background: color-mix(in srgb, var(--panel-solid) 94%, transparent);
+  box-shadow: -18px 0 42px color-mix(in srgb, #000 22%, transparent);
+  transform: translateX(0);
+  animation: popup-confirm-slide .18s ease-out both;
+}
+.popup-unpin-confirm strong {
+  color: var(--text-strong);
+  font-size: 14px;
+  letter-spacing: -.02em;
+}
+.popup-unpin-confirm p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.popup-unpin-confirm div {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.popup-unpin-confirm button {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  color: var(--text);
+  background: var(--surface);
+}
+.popup-unpin-confirm button.danger {
+  color: var(--coral);
+  border-color: color-mix(in srgb, var(--coral) 42%, transparent);
+  background: color-mix(in srgb, var(--coral) 12%, transparent);
+}
+@keyframes popup-confirm-slide {
+  from { opacity: 0; transform: translateX(18px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.compact-popup-actions .popup-unpin-confirm {
+  width: calc(100% - 20px);
+}
+
+/* Final popup radius and Esc-confirm tuning. */
+/* 这一组样式让弹窗根节点、外层壳和内容卡片共用同一个大圆角，并优化 Esc 确认卡片的圆角与文字层级。 */
+.clipanchor-popup-root,
+.clipanchor-popup-body {
+  --popup-window-radius: 30px;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  overflow: hidden !important;
+  background: transparent !important;
+}
+.clipanchor-popup-body #root {
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  overflow: hidden !important;
+  border-radius: var(--popup-window-radius);
+  background: transparent !important;
+}
+.clipanchor-popup-body .popup-shell {
+  padding: 0 !important;
+  overflow: hidden !important;
+  border-radius: var(--popup-window-radius) !important;
+  background: transparent !important;
+  clip-path: inset(0 round var(--popup-window-radius));
+}
+.clipanchor-popup-body .popup-card {
+  width: 100% !important;
+  height: 100% !important;
+  overflow: hidden !important;
+  border-radius: var(--popup-window-radius) !important;
+  background: var(--panel-solid) !important;
+}
+.clipanchor-popup-body.theme-light .popup-card,
+.theme-light.clipanchor-popup-body .popup-card {
+  background: #fff !important;
+}
+.popup-card.confirm-unpin-open .popup-content,
+.popup-card.confirm-unpin-open .popup-actions {
+  width: calc(100% - 226px);
+  max-width: calc(100% - 226px);
+}
+.popup-card.confirm-unpin-open .popup-actions {
+  padding-right: 0 !important;
+}
+.popup-card.confirm-unpin-open .popup-resize-handle {
+  opacity: 0;
+  pointer-events: none;
+}
+.popup-unpin-confirm {
+  top: 10px !important;
+  right: 10px !important;
+  bottom: 10px !important;
+  width: 206px !important;
+  min-width: 206px;
+  border-radius: 22px !important;
+  padding: 16px !important;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 84%, transparent) !important;
+  background: color-mix(in srgb, var(--panel-solid) 96%, transparent) !important;
+  box-shadow: -18px 0 46px color-mix(in srgb, #000 24%, transparent), inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent) !important;
+  backdrop-filter: blur(18px) saturate(145%);
+}
+.theme-light .popup-unpin-confirm {
+  background: rgba(255, 255, 255, .96) !important;
+  box-shadow: -18px 0 46px rgba(18, 36, 66, .16), inset 0 1px 0 rgba(255,255,255,.86) !important;
+}
+.popup-unpin-confirm strong {
+  font-size: 15px !important;
+  line-height: 1.22;
+  letter-spacing: -.03em;
+}
+.popup-unpin-confirm p {
+  font-size: 13.5px !important;
+  line-height: 1.52 !important;
+  color: color-mix(in srgb, var(--text) 78%, var(--muted)) !important;
+}
+.popup-unpin-confirm div {
+  gap: 7px !important;
+}
+.popup-unpin-confirm button {
+  min-width: 58px;
+  height: 30px !important;
+  padding: 0 11px !important;
+  border-radius: 11px !important;
+  font-size: 12px !important;
+  font-weight: 700;
+}
+.popup-unpin-confirm button.danger {
+  color: #fff !important;
+  border-color: color-mix(in srgb, var(--coral) 56%, transparent) !important;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--coral) 72%, #222 28%), color-mix(in srgb, var(--coral) 48%, #151922 52%)) !important;
+}
+.compact-popup-actions .popup-card.confirm-unpin-open .popup-content,
+.compact-popup-actions .popup-card.confirm-unpin-open .popup-actions {
+  width: calc(100% - 214px);
+  max-width: calc(100% - 214px);
+}
+.compact-popup-actions .popup-unpin-confirm {
+  width: 196px !important;
+  min-width: 196px;
+}
+
+/* 这组覆盖样式只保留内容卡片自身的大圆角，并让 Esc 确认层只做 transform/opacity 动画，避免窗口重设尺寸造成闪烁和按钮位移。 */
+/* This override keeps one visual card corner and animates Esc confirmation with transform/opacity only, avoiding resize flicker and action-button shifts. */
+.clipanchor-popup-root,
+.clipanchor-popup-body,
+.clipanchor-popup-body #root {
+  width: 100vw !important;
+  height: 100vh !important;
+  min-width: 100vw !important;
+  min-height: 100vh !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: visible !important;
+  background: transparent !important;
+}
+.clipanchor-popup-body {
+  --popup-window-radius: 30px;
+}
+.clipanchor-popup-body .popup-shell {
+  width: 100vw !important;
+  height: 100vh !important;
+  padding: 0 !important;
+  overflow: visible !important;
+  border-radius: 0 !important;
+  clip-path: none !important;
+  background: transparent !important;
+}
+.clipanchor-popup-body .popup-card {
+  width: 100% !important;
+  height: 100% !important;
+  overflow: hidden !important;
+  isolation: isolate;
+  border-radius: var(--popup-window-radius) !important;
+  background: var(--panel-solid) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.12), inset 0 0 0 1px color-mix(in srgb, var(--line-strong) 72%, transparent) !important;
+}
+.theme-light.clipanchor-popup-body .popup-card,
+.clipanchor-popup-body .theme-light .popup-card {
+  background: #fff !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.92), inset 0 0 0 1px rgba(8,14,24,.09) !important;
+}
+.clipanchor-popup-body .popup-card.confirm-unpin-open .popup-content,
+.clipanchor-popup-body .popup-card.confirm-unpin-open .popup-actions,
+.clipanchor-popup-body .compact-popup-actions .popup-card.confirm-unpin-open .popup-content,
+.clipanchor-popup-body .compact-popup-actions .popup-card.confirm-unpin-open .popup-actions {
+  width: auto !important;
+  max-width: none !important;
+}
+.clipanchor-popup-body .popup-content {
+  height: 100% !important;
+  min-height: 0 !important;
+  padding: 16px !important;
+  padding-bottom: 16px !important;
+  overflow: hidden !important;
+}
+.clipanchor-popup-body .popup-file-summary:empty {
+  display: none !important;
+}
+.clipanchor-popup-body .popup-actions {
+  position: absolute !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  z-index: 5 !important;
+  max-height: none !important;
+  padding: 0 16px 14px !important;
+  opacity: 0 !important;
+  transform: translate3d(0, calc(100% + 10px), 0) !important;
+  pointer-events: none !important;
+  transition: transform .24s cubic-bezier(.2,.8,.2,1), opacity .16s ease !important;
+  will-change: transform, opacity;
+}
+.clipanchor-popup-body .actions-visible .popup-actions {
+  opacity: 1 !important;
+  transform: translate3d(0, 0, 0) !important;
+  pointer-events: auto !important;
+}
+.clipanchor-popup-body .popup-actions::before {
+  content: '';
+  position: absolute;
+  inset: -18px 0 0;
+  z-index: -1;
+  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--panel-solid) 90%, transparent) 58%, var(--panel-solid));
+  pointer-events: none;
+}
+.theme-light.clipanchor-popup-body .popup-actions::before,
+.clipanchor-popup-body .theme-light .popup-actions::before {
+  background: linear-gradient(180deg, transparent, rgba(255,255,255,.90) 58%, #fff);
+}
+.clipanchor-popup-body .popup-card.confirm-unpin-open .popup-resize-handle {
+  opacity: .34 !important;
+  pointer-events: auto !important;
+}
+.clipanchor-popup-body .popup-unpin-confirm {
+  position: absolute !important;
+  z-index: 9 !important;
+  top: 12px !important;
+  right: 12px !important;
+  bottom: auto !important;
+  width: 218px !important;
+  min-width: 218px !important;
+  max-width: calc(100% - 24px) !important;
+  display: grid !important;
+  align-content: center !important;
+  gap: 10px !important;
+  padding: 16px !important;
+  border-radius: 22px !important;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 86%, transparent) !important;
+  color: var(--text) !important;
+  background: color-mix(in srgb, var(--panel-solid) 97%, transparent) !important;
+  box-shadow: -18px 18px 46px color-mix(in srgb, #000 22%, transparent), inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent) !important;
+  backdrop-filter: blur(18px) saturate(145%);
+  opacity: 0 !important;
+  transform: translate3d(18px, 0, 0) scale(.985) !important;
+  pointer-events: none !important;
+  animation: none !important;
+  transition: transform .24s cubic-bezier(.2,.8,.2,1), opacity .18s ease !important;
+  will-change: transform, opacity;
+}
+.clipanchor-popup-body .popup-unpin-confirm.open {
+  opacity: 1 !important;
+  transform: translate3d(0, 0, 0) scale(1) !important;
+  pointer-events: auto !important;
+}
+.theme-light.clipanchor-popup-body .popup-unpin-confirm,
+.clipanchor-popup-body .theme-light .popup-unpin-confirm {
+  background: rgba(255, 255, 255, .97) !important;
+  box-shadow: -18px 18px 46px rgba(18, 36, 66, .16), inset 0 1px 0 rgba(255,255,255,.86) !important;
+}
+.clipanchor-popup-body .popup-unpin-confirm strong {
+  font-size: 15px !important;
+  line-height: 1.22 !important;
+  letter-spacing: -.03em !important;
+}
+.clipanchor-popup-body .popup-unpin-confirm p {
+  margin: 0 !important;
+  color: color-mix(in srgb, var(--text) 78%, var(--muted)) !important;
+  font-size: 13.5px !important;
+  line-height: 1.52 !important;
+}
+.clipanchor-popup-body .popup-unpin-confirm div {
+  display: flex !important;
+  justify-content: flex-end !important;
+  gap: 7px !important;
+}
+.clipanchor-popup-body .popup-unpin-confirm button {
+  flex: 0 0 auto !important;
+  min-width: 58px !important;
+  height: 30px !important;
+  padding: 0 11px !important;
+  border-radius: 11px !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+}
+.clipanchor-popup-body.motion-performance .popup-actions,
+.clipanchor-popup-body .motion-performance .popup-actions,
+.clipanchor-popup-body.motion-performance .popup-unpin-confirm,
+.clipanchor-popup-body .motion-performance .popup-unpin-confirm {
+  transition-duration: .12s !important;
+}
+
+/* Final popup clipping, fixed action sizing, and stable Esc confirmation layout. */
+/* 最后一层弹窗覆盖：把可见底层和卡片裁剪为同一个圆角，同时让确认层与底部按钮互不影响。 */
+.clipanchor-popup-body {
+  --popup-window-radius: 30px;
+  background: transparent !important;
+}
+.clipanchor-popup-root,
+.clipanchor-popup-body,
+.clipanchor-popup-body #root {
+  width: 100vw !important;
+  height: 100vh !important;
+  min-width: 100vw !important;
+  min-height: 100vh !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  background: transparent !important;
+}
+.clipanchor-popup-body .popup-shell {
+  width: 100vw !important;
+  height: 100vh !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  border-radius: var(--popup-window-radius) !important;
+  clip-path: inset(0 round var(--popup-window-radius)) !important;
+  background: var(--panel-solid) !important;
+  contain: layout paint size !important;
+}
+.clipanchor-popup-body .popup-card {
+  width: 100% !important;
+  height: 100% !important;
+  overflow: hidden !important;
+  border-radius: var(--popup-window-radius) !important;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 72%, transparent) !important;
+  background: var(--panel-solid) !important;
+  backdrop-filter: none !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 11%, transparent), inset 0 0 0 1px color-mix(in srgb, var(--line-strong) 42%, transparent) !important;
+}
+.theme-light.clipanchor-popup-body .popup-card,
+.clipanchor-popup-body .theme-light .popup-card,
+.clipanchor-popup-body .theme-light.popup-shell {
+  background: #fff !important;
+}
+.clipanchor-popup-body .popup-shell.pinned .popup-card {
+  border-color: color-mix(in srgb, var(--blue) 44%, var(--line-strong)) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent), inset 0 0 0 1px color-mix(in srgb, var(--blue) 36%, transparent), inset 0 0 38px color-mix(in srgb, var(--blue) 13%, transparent) !important;
+}
+.theme-light.clipanchor-popup-body .popup-shell.pinned .popup-card,
+.clipanchor-popup-body .theme-light.popup-shell.pinned .popup-card {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.88), inset 0 0 0 1px color-mix(in srgb, var(--blue) 30%, transparent), inset 0 0 38px color-mix(in srgb, var(--blue) 10%, transparent) !important;
+}
+.clipanchor-popup-body .popup-content {
+  height: 100% !important;
+  min-height: 0 !important;
+  padding: 16px !important;
+  padding-bottom: 16px !important;
+  overflow: hidden !important;
+}
+.clipanchor-popup-body .popup-actions {
+  position: absolute !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  z-index: 5 !important;
+  max-height: none !important;
+  padding: 0 16px 14px !important;
+  opacity: 0 !important;
+  transform: translate3d(0, calc(100% + 10px), 0) !important;
+  pointer-events: none !important;
+  transition: transform .22s cubic-bezier(.2,.8,.2,1), opacity .14s ease !important;
+  will-change: transform, opacity;
+}
+.clipanchor-popup-body .actions-visible .popup-actions {
+  opacity: 1 !important;
+  transform: translate3d(0, 0, 0) !important;
+  pointer-events: auto !important;
+}
+.clipanchor-popup-body .popup-actions::before {
+  display: none !important;
+}
+.clipanchor-popup-body .popup-pinned-actions {
+  display: flex !important;
+  grid-template-columns: none !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  width: fit-content !important;
+  max-width: 100% !important;
+  gap: 8px !important;
+}
+.clipanchor-popup-body .popup-pinned-actions button {
+  flex: 0 0 auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  padding: 0 14px !important;
+  white-space: nowrap !important;
+}
+.clipanchor-popup-body .popup-pinned-actions .icon-only {
+  width: 38px !important;
+  min-width: 38px !important;
+  padding: 0 !important;
+}
+.clipanchor-popup-body .popup-pinned-actions button:nth-last-child(2) {
+  min-width: 82px !important;
+}
+.clipanchor-popup-body .popup-pinned-actions button:last-child {
+  min-width: 108px !important;
+}
+.clipanchor-popup-body .compact-popup-actions .popup-pinned-actions button:nth-last-child(2),
+.clipanchor-popup-body .compact-popup-actions .popup-pinned-actions button:last-child {
+  width: 38px !important;
+  min-width: 38px !important;
+  padding: 0 !important;
+}
+.clipanchor-popup-body .popup-pinned-actions .popup-action-text {
+  min-width: 0 !important;
+  white-space: nowrap !important;
+}
+.clipanchor-popup-body .popup-card.confirm-unpin-open .popup-content,
+.clipanchor-popup-body .popup-card.confirm-unpin-open .popup-actions,
+.clipanchor-popup-body .compact-popup-actions .popup-card.confirm-unpin-open .popup-content,
+.clipanchor-popup-body .compact-popup-actions .popup-card.confirm-unpin-open .popup-actions {
+  width: auto !important;
+  max-width: none !important;
+}
+.clipanchor-popup-body .popup-card.confirm-unpin-open .popup-resize-handle {
+  opacity: .28 !important;
+  pointer-events: auto !important;
+}
+.clipanchor-popup-body .popup-unpin-confirm {
+  position: absolute !important;
+  z-index: 9 !important;
+  top: 12px !important;
+  right: 12px !important;
+  bottom: auto !important;
+  width: min(300px, calc(100% - 24px)) !important;
+  min-width: 0 !important;
+  max-width: calc(100% - 24px) !important;
+  display: grid !important;
+  align-content: center !important;
+  gap: 9px !important;
+  padding: 15px !important;
+  border-radius: 24px !important;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 86%, transparent) !important;
+  color: var(--text) !important;
+  background: color-mix(in srgb, var(--panel-solid) 98%, transparent) !important;
+  box-shadow: -14px 14px 36px color-mix(in srgb, #000 20%, transparent), inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent) !important;
+  backdrop-filter: blur(14px) saturate(130%);
+  opacity: 0 !important;
+  transform: translate3d(14px, 0, 0) scale(.99) !important;
+  pointer-events: none !important;
+  animation: none !important;
+  transition: transform .20s cubic-bezier(.2,.8,.2,1), opacity .14s ease !important;
+  will-change: transform, opacity;
+}
+.clipanchor-popup-body .popup-unpin-confirm.open {
+  opacity: 1 !important;
+  transform: translate3d(0, 0, 0) scale(1) !important;
+  pointer-events: auto !important;
+}
+.theme-light.clipanchor-popup-body .popup-unpin-confirm,
+.clipanchor-popup-body .theme-light .popup-unpin-confirm {
+  background: rgba(255, 255, 255, .98) !important;
+  box-shadow: -14px 14px 36px rgba(18, 36, 66, .14), inset 0 1px 0 rgba(255,255,255,.86) !important;
+}
+.clipanchor-popup-body .popup-unpin-confirm strong {
+  font-size: 15px !important;
+  line-height: 1.22 !important;
+  letter-spacing: -.03em !important;
+}
+.clipanchor-popup-body .popup-unpin-confirm p {
+  margin: 0 !important;
+  overflow: hidden !important;
+  text-overflow: clip !important;
+  white-space: nowrap !important;
+  color: color-mix(in srgb, var(--text) 82%, var(--muted)) !important;
+  font-size: 12.8px !important;
+  line-height: 1.42 !important;
+  letter-spacing: -.02em !important;
+}
+.clipanchor-popup-body .popup-unpin-confirm div {
+  display: flex !important;
+  justify-content: flex-end !important;
+  gap: 7px !important;
+}
+.clipanchor-popup-body .popup-unpin-confirm button {
+  flex: 0 0 auto !important;
+  min-width: 56px !important;
+  height: 30px !important;
+  padding: 0 11px !important;
+  border-radius: 12px !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+}
+.clipanchor-popup-body.motion-performance .popup-actions,
+.clipanchor-popup-body .motion-performance .popup-actions,
+.clipanchor-popup-body.motion-performance .popup-unpin-confirm,
+.clipanchor-popup-body .motion-performance .popup-unpin-confirm {
+  transition-duration: .10s !important;
+}
+
+/* Current popup and data-management fixes. */
+/* 当前覆盖层只处理用户指出的问题：原生直角底板交给后端 Region 裁剪，前端保持同半径内容和更紧凑的文件预览。 */
+/* This final layer addresses the reported issues only: the backend clips the native square base, while the frontend keeps matching radii and compact file previews. */
+.clipanchor-popup-body {
+  --popup-window-radius: 30px;
+  --popup-inner-radius: 30px;
+  background: var(--panel-solid) !important;
+}
+.clipanchor-popup-root,
+.clipanchor-popup-body,
+.clipanchor-popup-body #root,
+.clipanchor-popup-body .popup-shell,
+.clipanchor-popup-body .popup-card {
+  border-radius: var(--popup-window-radius) !important;
+  overflow: hidden !important;
+}
+.clipanchor-popup-root,
+.clipanchor-popup-body,
+.clipanchor-popup-body #root {
+  background: transparent !important;
+}
+.clipanchor-popup-body .popup-shell {
+  background: var(--panel-solid) !important;
+  clip-path: inset(0 round var(--popup-window-radius)) !important;
+}
+.clipanchor-popup-body .popup-card {
+  background: var(--panel-solid) !important;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 72%, transparent) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent), inset 0 0 0 1px color-mix(in srgb, var(--line-strong) 36%, transparent) !important;
+}
+.theme-light.clipanchor-popup-body .popup-shell,
+.theme-light.clipanchor-popup-body .popup-card,
+.clipanchor-popup-body .theme-light.popup-shell,
+.clipanchor-popup-body .theme-light .popup-card {
+  background: #fff !important;
+}
+.clipanchor-popup-body .popup-content {
+  height: auto !important;
+  max-height: 100% !important;
+  padding: 14px !important;
+  padding-bottom: 10px !important;
+  gap: 8px !important;
+  align-content: start !important;
+}
+.clipanchor-popup-body .popup-file-list {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 6px !important;
+  min-height: 0 !important;
+  max-height: calc(100vh - 48px) !important;
+  overflow: hidden !important;
+}
+.clipanchor-popup-body .popup-file-list:not(.multi) {
+  grid-template-columns: 1fr !important;
+}
+.clipanchor-popup-body .popup-file-row {
+  min-height: 46px !important;
+  padding: 6px !important;
+  border-radius: 12px !important;
+}
+.clipanchor-popup-body .popup-file-more span {
+  font-family: var(--mono) !important;
+  font-size: 13px !important;
+  font-weight: 800 !important;
+  color: var(--text-strong) !important;
+  background: color-mix(in srgb, var(--blue) 18%, transparent) !important;
+}
+.clipanchor-popup-body .popup-file-more em {
+  color: color-mix(in srgb, var(--text) 78%, var(--muted)) !important;
+}
+.clipanchor-popup-body .popup-actions {
+  position: absolute !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  z-index: 6 !important;
+  padding: 0 14px 12px !important;
+  opacity: 0 !important;
+  transform: translate3d(0, calc(100% + 12px), 0) !important;
+  pointer-events: none !important;
+  background: transparent !important;
+}
+.clipanchor-popup-body .actions-visible .popup-actions {
+  opacity: 1 !important;
+  transform: translate3d(0, 0, 0) !important;
+  pointer-events: auto !important;
+}
+.clipanchor-popup-body .popup-pinned-actions {
+  display: flex !important;
+  width: fit-content !important;
+  max-width: calc(100vw - 28px) !important;
+  justify-content: flex-start !important;
+  gap: 8px !important;
+}
+.clipanchor-popup-body .popup-pinned-actions button {
+  flex: 0 0 auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  height: 38px !important;
+  padding: 0 12px !important;
+  white-space: nowrap !important;
+}
+.clipanchor-popup-body .popup-pinned-actions .icon-only {
+  width: 38px !important;
+  min-width: 38px !important;
+  padding: 0 !important;
+}
+.clipanchor-popup-body .popup-pinned-actions button:nth-last-child(2) {
+  min-width: 70px !important;
+}
+.clipanchor-popup-body .popup-pinned-actions button:last-child {
+  min-width: 94px !important;
+  max-width: 120px !important;
+}
+.clipanchor-popup-body .popup-unpin-confirm {
+  border-radius: 24px !important;
+}
+.old-history-cleanup {
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) minmax(150px, auto) auto;
+  align-items: end;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--surface) 74%, transparent);
+}
+.cleanup-days-field {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+.cleanup-days-field input {
+  height: 38px;
+}
+.cleanup-preserve-toggle {
+  min-height: 38px;
+  padding: 0 10px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+}
+.old-history-cleanup .soft-button {
+  min-height: 38px;
+  white-space: nowrap;
+}
+@media (max-width: 980px) {
+  .old-history-cleanup {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Final settings dialog and Windows popup hardening. */
+/* 最终覆盖：数据管理提示走软件内弹窗，弹窗窗口本体交给原生 Region 裁剪，前端只负责填满被裁剪后的圆角区域。 */
+.settings-dialog-backdrop {
+  z-index: 260;
+  background: color-mix(in srgb, var(--bg) 58%, transparent) !important;
+}
+.settings-dialog-card {
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  width: min(430px, calc(100vw - 56px));
+  padding: 18px;
+}
+.settings-dialog-icon {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 14%, transparent);
+}
+.settings-dialog-card.danger .settings-dialog-icon {
+  color: var(--coral);
+  background: color-mix(in srgb, var(--coral) 16%, transparent);
+}
+.settings-dialog-copy {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+.settings-dialog-copy p {
+  color: color-mix(in srgb, var(--text) 82%, var(--muted));
+}
+.settings-dialog-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.settings-dialog-actions .primary-button,
+.settings-dialog-actions .soft-button {
+  min-width: 84px;
+}
+.clipanchor-popup-body {
+  --popup-window-radius: 30px;
+  background: var(--panel-solid) !important;
+}
+.theme-light.clipanchor-popup-body {
+  background: #fff !important;
+}
+.clipanchor-popup-root,
+.clipanchor-popup-body,
+.clipanchor-popup-body #root,
+.clipanchor-popup-body .popup-shell {
+  width: 100vw !important;
+  height: 100vh !important;
+  min-width: 100vw !important;
+  min-height: 100vh !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  border-radius: var(--popup-window-radius) !important;
+}
+.clipanchor-popup-body #root,
+.clipanchor-popup-body .popup-shell {
+  background: var(--panel-solid) !important;
+  clip-path: inset(0 round var(--popup-window-radius)) !important;
+}
+.theme-light.clipanchor-popup-body #root,
+.theme-light.clipanchor-popup-body .popup-shell,
+.clipanchor-popup-body .theme-light.popup-shell {
+  background: #fff !important;
+}
+.clipanchor-popup-body .popup-card {
+  width: 100% !important;
+  height: 100% !important;
+  border-radius: var(--popup-window-radius) !important;
+  overflow: hidden !important;
+  background: var(--panel-solid) !important;
+}
+.theme-light.clipanchor-popup-body .popup-card,
+.clipanchor-popup-body .theme-light .popup-card {
+  background: #fff !important;
+}
+.clipanchor-popup-body .popup-content {
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  align-content: start !important;
+  padding: 14px !important;
+  padding-bottom: 8px !important;
+  overflow: hidden !important;
+}
+.clipanchor-popup-body .popup-file-list {
+  max-height: none !important;
+  overflow: hidden !important;
+}
+.clipanchor-popup-body .popup-actions {
+  position: absolute !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  z-index: 8 !important;
+  padding: 0 14px 12px !important;
+  margin: 0 !important;
+  background: transparent !important;
+  opacity: 0 !important;
+  transform: translate3d(0, calc(100% + 12px), 0) !important;
+  pointer-events: none !important;
+}
+.clipanchor-popup-body .actions-visible .popup-actions {
+  opacity: 1 !important;
+  transform: translate3d(0, 0, 0) !important;
+  pointer-events: auto !important;
+}
+.clipanchor-popup-body .popup-actions::before {
+  display: none !important;
+}
+
+/* Latest shortcut and popup interaction fixes. */
+/* 最新覆盖只处理本轮反馈：三列快捷键、无预留按钮空白、提高覆盖按钮可读性，并确保缩放角标始终可点。 */
+/* This latest override addresses this round only: three shortcut columns, no reserved action space, stronger overlay-action readability, and a resize handle that remains clickable. */
+.shortcut-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+}
+@media (max-width: 980px) {
+  .shortcut-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+.clipanchor-popup-body .popup-content {
+  box-sizing: border-box !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  padding: 14px !important;
+  padding-bottom: 14px !important;
+  overflow: hidden !important;
+  align-content: start !important;
+}
+.clipanchor-popup-body .popup-text-body {
+  max-height: calc(100vh - 56px) !important;
+  overflow: hidden !important;
+  display: -webkit-box !important;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+}
+.clipanchor-popup-body .popup-file-list {
+  max-height: calc(100vh - 48px) !important;
+  overflow: hidden !important;
+}
+.clipanchor-popup-body .popup-actions {
+  position: absolute !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  z-index: 12 !important;
+  padding: 18px 14px 12px !important;
+  margin: 0 !important;
+  opacity: 0 !important;
+  transform: translate3d(0, calc(100% + 12px), 0) !important;
+  pointer-events: none !important;
+  background: transparent !important;
+}
+.clipanchor-popup-body .popup-actions::before {
+  content: '' !important;
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: -1 !important;
+  display: block !important;
+  opacity: .96 !important;
+  pointer-events: none !important;
+  background: linear-gradient(180deg, transparent 0%, color-mix(in srgb, var(--panel-solid) 78%, transparent) 38%, color-mix(in srgb, var(--panel-solid) 96%, transparent) 100%) !important;
+}
+.theme-light.clipanchor-popup-body .popup-actions::before,
+.clipanchor-popup-body .theme-light .popup-actions::before {
+  background: linear-gradient(180deg, transparent 0%, rgba(255,255,255,.80) 38%, rgba(255,255,255,.98) 100%) !important;
+}
+.clipanchor-popup-body .actions-visible .popup-actions {
+  opacity: 1 !important;
+  transform: translate3d(0, 0, 0) !important;
+  pointer-events: auto !important;
+}
+.clipanchor-popup-body .popup-actions button {
+  color: var(--text-strong) !important;
+  background: color-mix(in srgb, var(--panel-solid) 88%, var(--surface) 12%) !important;
+  border-color: color-mix(in srgb, var(--line-strong) 78%, transparent) !important;
+  box-shadow: 0 10px 26px color-mix(in srgb, #000 24%, transparent), inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent) !important;
+  backdrop-filter: blur(12px) saturate(125%);
+}
+.theme-light.clipanchor-popup-body .popup-actions button,
+.clipanchor-popup-body .theme-light .popup-actions button {
+  background: rgba(255,255,255,.94) !important;
+  border-color: rgba(8,14,24,.13) !important;
+  box-shadow: 0 10px 24px rgba(18,36,66,.16), inset 0 1px 0 rgba(255,255,255,.90) !important;
+}
+.clipanchor-popup-body .popup-pinned-actions {
+  width: fit-content !important;
+  max-width: calc(100vw - 28px) !important;
+  gap: 8px !important;
+}
+.clipanchor-popup-body .popup-pinned-actions button:nth-last-child(2) {
+  min-width: 70px !important;
+}
+.clipanchor-popup-body .popup-pinned-actions .unpin-action-button {
+  min-width: 94px !important;
+  max-width: 112px !important;
+}
+.clipanchor-popup-body .popup-resize-handle {
+  z-index: 30 !important;
+  right: 6px !important;
+  bottom: 6px !important;
+  width: 28px !important;
+  height: 28px !important;
+  opacity: .72 !important;
+  pointer-events: auto !important;
+  cursor: nwse-resize !important;
+}
+.clipanchor-popup-body .popup-resize-handle::before {
+  right: 5px !important;
+  bottom: 5px !important;
+}
+.clipanchor-popup-body .popup-resize-handle:hover {
+  opacity: 1 !important;
+}
+
+/* Popup content must size to copied content, not to the hidden action layer. */
+/* 弹窗内容只按复制内容自身排布，而不是填满隐藏按钮层所在的窗口高度。 */
+/* Popup content is laid out by the copied content itself rather than filling the window height reserved for hidden actions. */
+.clipanchor-popup-body .popup-content {
+  height: auto !important;
+  max-height: calc(100vh - 2px) !important;
+}
+
+/* Current round: remove misleading Ctrl+Shift+X page badge and let resized popups reveal hidden content. */
+/* 本轮覆盖：去掉容易误解的 Ctrl+Shift+X 页面徽标，并让弹窗放大后自动释放被省略内容。 */
+.workspace-status-capsule {
+  grid-template-columns: auto minmax(0, auto) !important;
+  max-width: min(360px, 36vw) !important;
+}
+.workspace-status-capsule kbd {
+  display: none !important;
+}
+.workspace-status-capsule span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.shortcut-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+}
+@media (max-width: 1080px) {
+  .shortcut-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+@media (max-width: 760px) {
+  .shortcut-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+.clipanchor-popup-body .popup-content {
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: calc(100vh - 2px) !important;
+  padding: 14px !important;
+  padding-bottom: 8px !important;
+  overflow: hidden !important;
+  align-content: start !important;
+}
+.clipanchor-popup-body .popup-text-body {
+  min-height: 0 !important;
+  max-height: calc(100vh - 48px) !important;
+  display: block !important;
+  -webkit-line-clamp: unset !important;
+  -webkit-box-orient: initial !important;
+  overflow: hidden !important;
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+}
+.clipanchor-popup-body .popup-file-list {
+  max-height: calc(100vh - 48px) !important;
+  overflow: hidden !important;
+  align-content: start !important;
+}
+.clipanchor-popup-body .popup-file-list.multi {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+.clipanchor-popup-body .popup-actions {
+  padding: 22px 14px 12px !important;
+  transform: translate3d(0, calc(100% + 10px), 0) !important;
+}
+.clipanchor-popup-body .actions-visible .popup-actions {
+  transform: translate3d(0, 0, 0) !important;
+}
+.clipanchor-popup-body .popup-actions::before {
+  opacity: .99 !important;
+  background: linear-gradient(180deg, transparent 0%, color-mix(in srgb, var(--panel-solid) 88%, transparent) 30%, color-mix(in srgb, var(--panel-solid) 99%, transparent) 100%) !important;
+}
+.theme-light.clipanchor-popup-body .popup-actions::before,
+.clipanchor-popup-body .theme-light .popup-actions::before {
+  background: linear-gradient(180deg, transparent 0%, rgba(255,255,255,.90) 30%, rgba(255,255,255,1) 100%) !important;
+}
+.clipanchor-popup-body .popup-actions button {
+  background: color-mix(in srgb, var(--panel-solid) 96%, var(--surface) 4%) !important;
+  border-color: color-mix(in srgb, var(--line-strong) 88%, transparent) !important;
+}
+
+/* The header action capsule was decorative and confused the shortcut meaning, so the workspace header is reduced to content-only layout. */
+/* 右侧状态胶囊只是装饰且会误导快捷键含义，因此工作区标题栏改为只承载实质内容。 */
+.workspace-header {
+  grid-template-columns: minmax(0, 1fr) !important;
+  min-height: 92px !important;
+}
+.workspace-status-capsule,
+.command-capsule.workspace-status-capsule {
+  display: none !important;
+}
+
+/* Current requested polish: data row compaction, empty-state spacing, and live popup resize rendering. */
+/* 本轮覆盖聚焦用户反馈：数据管理同排、空状态间距、以及弹窗缩放时实时释放内容。 */
+.data-management-primary-row {
+  display: grid;
+  grid-template-columns: minmax(220px, .8fr) minmax(360px, 1.2fr);
+  gap: 10px;
+  align-items: stretch;
+}
+.data-management-primary-row .data-summary-strip,
+.data-management-primary-row .history-limit-row {
+  min-height: 50px !important;
+  margin: 0 !important;
+}
+.data-management-primary-row .history-limit-row {
+  display: grid !important;
+  grid-template-columns: minmax(130px, auto) minmax(260px, 1fr) !important;
+  align-items: center !important;
+}
+@media (max-width: 1120px) {
+  .data-management-primary-row {
+    grid-template-columns: 1fr;
+  }
+}
+.premium-empty {
+  gap: 5px !important;
+  align-content: center !important;
+}
+.premium-empty > svg {
+  transform: translateY(7px);
+  margin-bottom: -2px;
+}
+.clipanchor-popup-body .popup-shell {
+  contain: layout paint !important;
+}
+.clipanchor-popup-body .popup-content {
+  display: grid !important;
+  grid-auto-rows: max-content !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: calc(100vh - 2px) !important;
+  padding: 14px !important;
+  padding-bottom: 10px !important;
+  overflow: hidden !important;
+  align-content: start !important;
+}
+.clipanchor-popup-body .popup-text-body {
+  max-height: calc(100vh - 46px) !important;
+  overflow: hidden !important;
+  display: block !important;
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+  line-height: 1.36 !important;
+}
+.clipanchor-popup-body .popup-file-list {
+  max-height: calc(100vh - 44px) !important;
+  overflow: hidden !important;
+}
+.clipanchor-popup-body .popup-actions {
+  padding: 18px 14px 12px !important;
+  background: transparent !important;
+}
+.clipanchor-popup-body .popup-actions::before {
+  opacity: 1 !important;
+}
+.clipanchor-popup-body .popup-resize-handle {
+  z-index: 40 !important;
+  touch-action: none !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+.workspace-status-capsule,
+.command-capsule.workspace-status-capsule {
+  display: none !important;
+}
+
+/* File-copy popups must show every selected file without pretending there is a fixed preview cap. */
+/* 文件复制弹窗必须展示全部已选文件，不能因为固定预览上限让用户误以为文件丢失。 */
+.clipanchor-popup-body .popup-file-list {
+  max-height: max(92px, calc(100vh - 86px)) !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  padding-right: 3px !important;
+  overscroll-behavior: contain !important;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--blue) 45%, transparent) transparent;
+}
+.clipanchor-popup-body .popup-file-list.multi {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+.clipanchor-popup-body .popup-file-list::-webkit-scrollbar {
+  width: 5px;
+}
+.clipanchor-popup-body .popup-file-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.clipanchor-popup-body .popup-file-list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--blue) 38%, transparent);
+}
+.clipanchor-popup-body .popup-file-list::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--blue) 58%, transparent);
+}
+
+/* Current fix: file popups must expose the real copied count and make overflow visibly scrollable instead of looking capped. */
+/* 本轮修复：文件弹窗必须展示真实复制数量，并让溢出区域明确可滚动，避免看起来像被限制数量。 */
+.clipanchor-popup-body .popup-file-count {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 4px 2px 6px;
+  color: var(--muted);
+  font: 700 11px/1.2 var(--mono);
+  background: color-mix(in srgb, var(--panel-solid) 94%, transparent);
+}
+.clipanchor-popup-body .popup-file-list {
+  max-height: max(126px, calc(100vh - 72px)) !important;
+  overflow-y: scroll !important;
+  overflow-x: hidden !important;
+  padding-right: 5px !important;
+  scrollbar-gutter: stable !important;
+}
+.clipanchor-popup-body .popup-file-row {
+  min-height: 42px !important;
+}
+
+/* The empty history illustration must use a column layout so the icon never overlaps the message text on Windows WebView font metrics. */
+/* 空历史插画必须使用纵向布局，避免 Windows WebView 字体度量变化时图标压到提示文字。 */
+.empty-state.premium-empty {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 12px !important;
+  text-align: center !important;
+}
+
+.empty-state.premium-empty > svg {
+  flex: 0 0 auto !important;
+  transform: none !important;
+  margin: 0 !important;
+}
+
+.empty-state.premium-empty > strong {
+  display: block !important;
+  max-width: min(720px, 86%) !important;
+  line-height: 1.65 !important;
+}
+
+/* Current polish: small file selections should keep breathable spacing without reintroducing a hard size lock. */
+/* 本轮微调：少量文件复制时保持舒适边距，但不把弹窗尺寸写死，Pin 后仍可手动缩小。 */
+.clipanchor-popup-body .popup-file-count {
+  margin-bottom: 4px !important;
+}
+.clipanchor-popup-body .popup-file-list {
+  overflow-y: auto !important;
+  padding: 2px 5px 8px 0 !important;
+}
+.clipanchor-popup-body .popup-file-list:not(.multi) {
+  grid-template-columns: 1fr !important;
+  max-width: 100% !important;
+}
+.clipanchor-popup-body .popup-file-row {
+  min-height: 50px !important;
+  padding: 9px 10px !important;
+  gap: 10px !important;
+}
+.clipanchor-popup-body .popup-file-row span,
+.clipanchor-popup-body .popup-file-row img {
+  width: 38px !important;
+  height: 38px !important;
+  flex: 0 0 38px !important;
+}
+.clipanchor-popup-body .popup-file-row em {
+  line-height: 1.35 !important;
+}
+
+/* File preview rows need explicit grid-row sizing because dense two-column lists and the scroll gutter can otherwise visually squeeze the icon cell at the bottom edge. */
+/* 文件预览行需要显式的网格行尺寸，因为双列密集列表和滚动槽会让图标单元格在底部边缘看起来被挤压。 */
+.clipanchor-popup-body .popup-file-list {
+  align-content: start !important;
+  grid-auto-rows: minmax(64px, auto) !important;
+  gap: 8px !important;
+  padding: 4px 8px 16px 2px !important;
+}
+
+/* The icon cell uses a fixed square plus symmetric row padding so copied-file rows keep equal top and bottom breathing room at any popup size. */
+/* 图标单元格使用固定正方形与对称行内边距，这样文件行在任意弹窗尺寸下都能保持上下边距一致。 */
+.clipanchor-popup-body .popup-file-row {
+  box-sizing: border-box !important;
+  display: grid !important;
+  grid-template-columns: 44px minmax(0, 1fr) !important;
+  align-items: center !important;
+  min-height: 64px !important;
+  padding: 10px 12px !important;
+  gap: 12px !important;
+}
+
+/* The visible file icon is centered independently from text baseline metrics, avoiding the lower-edge crowding seen on Windows WebView. */
+/* 可见文件图标独立于文字基线居中，避免 Windows WebView 中出现图标下边缘拥挤的问题。 */
+.clipanchor-popup-body .popup-file-row span,
+.clipanchor-popup-body .popup-file-row img {
+  box-sizing: border-box !important;
+  align-self: center !important;
+  justify-self: center !important;
+  width: 40px !important;
+  height: 40px !important;
+  min-width: 40px !important;
+  min-height: 40px !important;
+  max-width: 40px !important;
+  max-height: 40px !important;
+  margin: 0 !important;
+  display: grid !important;
+  place-items: center !important;
+}
+
+.clipanchor-popup-body .popup-file-row span svg {
+  display: block !important;
+  margin: auto !important;
+}
+
+/* 搜索区独立成完整的两行工具面板，避免输入框作为 flex 子项时把圆角、阴影和边框挤出父容器。
+   The search area is isolated into a complete two-row toolbar so flex overflow cannot clip its radius, shadow, or border. */
+.premium-toolbar.compact-history-toolbar.two-row-toolbar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  min-height: 104px;
+  padding: 12px;
+  overflow: visible;
+}
+
+/* 搜索框需要自己占满一整行并隐藏内部溢出，否则图标加 100% 输入框会在 Windows WebView 中造成右侧阴影断裂。
+   The search box owns a full row and clips only its inner content, because an icon plus a 100% input can break the right-side shadow in Windows WebView. */
+.search-box.toolbar-search-row {
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  min-height: 46px;
+  padding: 0 14px;
+  border-radius: 15px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .05),
+    0 10px 26px color-mix(in srgb, var(--shadow) 58%, transparent);
+}
+
+.search-box.toolbar-search-row svg {
+  flex: 0 0 auto;
+}
+
+.search-box.toolbar-search-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  height: 100%;
+  font-size: 13px;
+}
+
+.search-box.toolbar-search-row:focus-within {
+  border-color: rgba(49, 159, 255, .42);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .06),
+    0 0 0 3px rgba(49, 159, 255, .12),
+    0 12px 30px color-mix(in srgb, var(--shadow) 62%, transparent);
+}
+
+/* 第二行按钮保持在同一个完整容器内，工具栏外框才能完整包住搜索框和筛选按钮。
+   Keeping the second-row actions inside the same panel lets the outer toolbar fully contain both search and filters. */
+.toolbar-action-row {
+  min-width: 0;
+  padding: 0 2px;
+}
+
+
+/* 搜索区改为“独立搜索条 + 独立操作行”，移除旧的大外框和重阴影，避免 Windows WebView 把阴影裁成中间一段。
+   The search area is changed to an independent search bar plus an independent action row; removing the old large shell and heavy shadow prevents Windows WebView from clipping the shadow into a broken middle strip. */
+.premium-toolbar.compact-history-toolbar.two-row-toolbar {
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  gap: 12px !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  overflow: visible !important;
+}
+
+/* 搜索框本身承担完整边框，不再依赖外层容器包裹；这样不同缩放比例下也不会出现“只剩中间一节阴影”的错觉。
+   The search box now owns the whole border instead of relying on an outer wrapper, so mixed DPI and zoom levels cannot create a partial-shadow illusion. */
+.search-box.toolbar-search-row {
+  box-sizing: border-box !important;
+  display: flex !important;
+  align-items: center !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 52px !important;
+  min-height: 52px !important;
+  padding: 0 18px !important;
+  gap: 12px !important;
+  border: 1px solid color-mix(in srgb, var(--line) 86%, rgba(49, 159, 255, .22)) !important;
+  border-radius: 18px !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .052), rgba(255, 255, 255, .024)),
+    color-mix(in srgb, var(--panel) 88%, transparent) !important;
+  color: var(--muted) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .055) !important;
+  overflow: hidden !important;
+}
+
+.search-box.toolbar-search-row svg {
+  flex: 0 0 auto !important;
+  opacity: .82 !important;
+}
+
+.search-box.toolbar-search-row input {
+  flex: 1 1 auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  height: 100% !important;
+  border: 0 !important;
+  outline: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  color: var(--text) !important;
+  font-size: 14px !important;
+}
+
+.search-box.toolbar-search-row:focus-within {
+  border-color: rgba(49, 159, 255, .48) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .065),
+    0 0 0 3px rgba(49, 159, 255, .12) !important;
+}
+
+/* 操作按钮行脱离搜索框外壳，保持紧凑排列；删除按钮仍靠右，避免按钮挤压搜索条宽度。
+   The action row is separated from the search shell and remains compact, while the delete button stays right-aligned so actions never squeeze the search bar. */
+.toolbar-action-row {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  flex-wrap: wrap !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.toolbar-action-row .filter-chips {
+  min-height: 42px !important;
+  padding: 4px !important;
+  border-radius: 14px !important;
+}
+
+.toolbar-action-row .soft-button {
+  min-height: 42px !important;
+}
+
+.toolbar-action-row .danger-line {
+  margin-left: auto !important;
+}
+
+/* 搜索输入框只保留外层胶囊边框，内部 input 不再继承全局输入框的高度、边框和聚焦阴影，避免上下线条贴住甚至重叠外框。
+   The search input keeps only the outer capsule border; the inner input no longer inherits global height, border, or focus shadow, preventing its top/bottom lines from touching or overlapping the shell. */
+.search-box.toolbar-search-row {
+  height: 56px !important;
+  min-height: 56px !important;
+  padding: 0 20px !important;
+  gap: 12px !important;
+  align-items: center !important;
+  overflow: hidden !important;
+}
+
+/* 输入文字需要有独立的内边距，同时取消 input 自身可见边界；这样用户看到的是一个完整搜索框，而不是“搜索框里又套了一个贴边输入框”。
+   Text entry needs its own small inset while the input itself stays visually borderless, so users see one complete search bar instead of a flush nested input inside another frame. */
+.search-box.toolbar-search-row input,
+.search-box.toolbar-search-row input:focus,
+.search-box.toolbar-search-row input:focus-visible {
+  box-sizing: border-box !important;
+  flex: 1 1 auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  height: 26px !important;
+  min-height: 0 !important;
+  max-height: 26px !important;
+  margin: 0 !important;
+  padding: 0 4px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  outline: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--text) !important;
+  line-height: 26px !important;
+  -webkit-appearance: none !important;
+  appearance: none !important;
+}
+
+.search-box.toolbar-search-row input::placeholder {
+  color: color-mix(in srgb, var(--muted) 82%, transparent) !important;
+}
+
+/* 历史工具区改用专属类名并退出旧 toolbar/search-box 级联，是为了彻底避开历史叠加样式造成的高度计算错误和列表重叠。
+   The history controls use dedicated class names and leave the old toolbar/search-box cascade so accumulated overrides cannot break height calculation or overlap the list. */
+.history-control-panel {
+  position: relative !important;
+  z-index: 2 !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 12px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+  padding: 12px 14px 14px !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 18px !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .045), rgba(255, 255, 255, .018)),
+    color-mix(in srgb, var(--panel) 92%, transparent) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .055) !important;
+  overflow: visible !important;
+}
+
+/* 搜索框只保留一层可见边框，内部 input 完全透明，是为了避免输入框边线贴住外框或被 WebView 缩放裁切。
+   The search field keeps exactly one visible border while the inner input stays transparent, preventing nested input lines from touching the shell or being clipped by WebView scaling. */
+.history-search-field {
+  box-sizing: border-box !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  width: 100% !important;
+  height: 50px !important;
+  min-height: 50px !important;
+  padding: 0 18px !important;
+  border: 1px solid color-mix(in srgb, var(--line) 78%, rgba(49, 159, 255, .24)) !important;
+  border-radius: 16px !important;
+  color: var(--muted) !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .052), rgba(255, 255, 255, .025)),
+    rgba(255, 255, 255, .024) !important;
+  overflow: hidden !important;
+}
+
+.history-search-field svg {
+  flex: 0 0 auto !important;
+  opacity: .82 !important;
+}
+
+/* 输入文字单独留出内边距，是为了让光标和占位文字不会贴在图标或搜索框边缘上。
+   The text input keeps its own small inset so the caret and placeholder never touch the icon or the search field edge. */
+.history-search-field input,
+.history-search-field input:focus,
+.history-search-field input:focus-visible {
+  box-sizing: border-box !important;
+  flex: 1 1 auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  height: 28px !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 6px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  outline: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--text) !important;
+  font-size: 14px !important;
+  line-height: 28px !important;
+  -webkit-appearance: none !important;
+  appearance: none !important;
+}
+
+.history-search-field input::placeholder {
+  color: color-mix(in srgb, var(--muted) 82%, transparent) !important;
+}
+
+.history-search-field:focus-within {
+  border-color: rgba(49, 159, 255, .48) !important;
+  box-shadow: 0 0 0 3px rgba(49, 159, 255, .12) !important;
+}
+
+/* 操作行留在面板的正常文档流中，是为了让筛选按钮、新增按钮和删除按钮真实撑开工具区高度。
+   The action row stays in normal document flow so filters, create, and delete actions genuinely reserve toolbar height. */
+.history-action-bar {
+  position: relative !important;
+  z-index: 1 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  flex-wrap: wrap !important;
+  min-width: 0 !important;
+  min-height: 42px !important;
+}
+
+.history-action-bar .filter-chips {
+  min-height: 42px !important;
+  padding: 4px !important;
+  border-radius: 14px !important;
+}
+
+.history-action-bar .soft-button {
+  min-height: 42px !important;
+  white-space: nowrap !important;
+}
+
+.history-action-bar .danger-line {
+  margin-left: auto !important;
+}
+
+/* 列表显式低于工具区，是为了即使历史卡片有 hover 位移，也不会盖住搜索和筛选操作区。
+   The list is explicitly layered below controls so hover-lifted history cards cannot cover the search and filter area. */
+.history-list.compact-history-list {
+  position: relative !important;
+  z-index: 0 !important;
+}
+
+@media (max-width: 760px) {
+  .history-action-bar .danger-line {
+    margin-left: 0 !important;
+  }
+}
+
+/* 日志管理作为数据维护的独立次级卡片，是为了让数据库管理保持主视觉权重，同时避免日志阴影压到清理按钮。 */
+/* Log management is a separate secondary maintenance card so database management keeps primary visual weight and log shadows never overlap cleanup controls. */
+.log-card {
+  grid-column: 1 / -1;
+  margin-top: 6px;
+}
+
+.log-card h2 {
+  margin-bottom: 12px;
+}
+
+.log-management-panel {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  box-shadow: none;
+}
+
+.log-management-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.log-management-header strong {
+  display: block;
+  font-size: 15px;
+  color: var(--text);
+  margin-bottom: 5px;
+}
+
+.log-management-copy {
+  min-width: 0;
+}
+
+/* 日志说明逐句换行，是为了让用户明确看到“达到多大轮转”“保留几天”“不记录剪贴板正文”三个独立规则。 */
+/* The log hint is line-broken by sentence so users clearly see the size limit, retention days, and clipboard-privacy rule as separate policies. */
+.log-management-hint-lines {
+  display: grid;
+  gap: 2px;
+  max-width: 820px;
+}
+
+.log-management-hint-lines p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.58;
+}
+
+.log-size-pill {
+  flex: 0 0 auto;
+  min-width: 88px;
+  text-align: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
+  color: var(--text);
+  font-weight: 800;
+  box-shadow: none;
+}
+
+.log-control-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, .58fr) minmax(360px, 1fr);
+  gap: 12px;
+  align-items: end;
+}
+
+.log-retention-row,
+.log-path-field {
+  min-height: 54px;
+}
+
+.log-retention-row {
+  display: grid !important;
+  grid-template-columns: minmax(160px, auto) minmax(220px, 1fr) !important;
+  align-items: center !important;
+  gap: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+}
+
+.log-path-field input {
+  height: 40px;
+}
+
+.log-file-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 30px;
+  align-items: center;
+}
+
+.log-file-strip span {
+  max-width: 260px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 76%, transparent);
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.log-actions {
+  justify-content: flex-start;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.theme-dark .log-management-panel {
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+}
+
+.theme-dark .log-size-pill,
+.theme-dark .log-file-strip span,
+.theme-dark .log-retention-row {
+  background: rgba(255, 255, 255, 0.045);
+}
+
+@media (max-width: 980px) {
+  .log-management-header,
+  .log-control-grid {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .log-size-pill {
+    width: fit-content;
+  }
+}
+
+
+/* 日志管理的“保留天数”和“日志目录”改为上下分区，是为了避免不同控件在同一行抢占宽度导致标签、步进器和路径输入框互相覆盖。 */
+/* The log retention and log directory controls are separated vertically so labels, steppers, and path inputs never compete for the same row width and overlap. */
+.log-card .log-control-grid {
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  gap: 16px !important;
+  align-items: stretch !important;
+}
+
+/* 保留天数仍保持紧凑横向布局，但只占自己的整行，保证右侧步进器不会压到日志路径标题。 */
+/* Retention days stay as a compact horizontal row, but they own the full row so the right-side stepper cannot collide with the log path title. */
+.log-card .log-retention-row {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) max-content !important;
+  width: 100% !important;
+  min-height: 62px !important;
+  box-sizing: border-box !important;
+  margin: 0 !important;
+  align-items: center !important;
+}
+
+.log-card .log-retention-row .stepper-control {
+  justify-self: end !important;
+  max-width: 100% !important;
+}
+
+.log-card .log-retention-row .stepper-control strong {
+  white-space: nowrap !important;
+}
+
+/* 日志路径使用独立的标题加只读输入框，是为了让长路径完整落在自己的区域内，而不是与保留天数控件同排挤压。 */
+/* The log path uses its own label and read-only field so long paths stay in their own area instead of squeezing beside retention controls. */
+.log-card .log-path-field {
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  gap: 8px !important;
+  width: 100% !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  align-items: stretch !important;
+}
+
+.log-card .log-path-field .setting-name {
+  justify-self: start !important;
+  min-height: 20px !important;
+}
+
+.log-card .log-path-field input {
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 42px !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+/* 日志文件标签和操作按钮与路径区保持明确间距，是为了避免视觉上像被上一行阴影压住。 */
+/* Log chips and action buttons keep clear spacing from the path area so they do not look visually pressed by the previous row shadow. */
+.log-card .log-file-strip {
+  margin-top: 2px !important;
+}
+
+.log-card .log-actions {
+  margin-top: 2px !important;
+}
+
+@media (max-width: 760px) {
+  .log-card .log-retention-row {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+
+  .log-card .log-retention-row .stepper-control {
+    justify-self: start !important;
+  }
+}
+
+/* 更新检查使用软件内占位弹窗，是为了在正式发布通道确认前避免原生系统弹窗破坏自绘 UI 一致性。 */
+/* Update checks use an in-app placeholder so the custom UI remains consistent before the real release channel is confirmed. */
+.update-placeholder-backdrop {
+  z-index: 260;
+}
+.update-placeholder-card {
+  width: min(520px, calc(100vw - 52px));
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: start;
+}
+.update-placeholder-icon {
+  color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 15%, transparent);
+}
+.update-placeholder-copy {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+.update-placeholder-copy p {
+  white-space: pre-line;
+}
+.update-placeholder-copy .update-placeholder-note {
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  color: var(--text-soft);
+}
+.update-placeholder-actions {
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+}
+
+/* 更新按钮提示点只在后台检查失败或发现新版本时出现，是为了让用户稍后能回到更新入口，同时不在自启动静默阶段弹窗打扰。 */
+/* The update dot appears only after failed background checks or available updates so users can return later without being interrupted during silent startup. */
+.update-check-button {
+  position: relative;
+}
+
+.update-check-button .update-attention-dot {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--coral);
+  box-shadow: 0 0 0 2px var(--surface), 0 0 12px color-mix(in srgb, var(--coral) 55%, transparent);
+  pointer-events: none;
+}
+
+.update-check-button.has-update-attention:hover .update-attention-dot {
+  transform: scale(1.08);
+}
+
+/* 收藏星标现在属于标题状态而不是正文后缀，因此放在标题最前方更容易扫描。 */
+/* The favorite star now represents title state rather than a text suffix, so placing it first makes the list easier to scan. */
+.compact-history-item.favorite .record-main strong::after {
+  content: none !important;
+}
+
+/* 移除缩略图前的类型图标后，列表列宽需要同步收敛，避免左侧出现空列或内容错位。 */
+/* After removing the type icon before thumbnails, the grid columns must shrink together to prevent blank columns and misalignment. */
+.history-item,
+.compact-history-item,
+.compact-history-list .history-item {
+  grid-template-columns: 24px 56px minmax(0, 1fr) auto !important;
+}
+
+.record-title-line {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.record-title-line > span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.favorite-title-marker {
+  flex: 0 0 auto;
+  color: var(--blue);
+  fill: color-mix(in srgb, var(--blue) 22%, transparent);
+}
+
+@media (max-width: 760px) {
+  .history-item,
+  .compact-history-item,
+  .compact-history-list .history-item {
+    grid-template-columns: 24px 46px minmax(0, 1fr) !important;
+  }
+  .compact-history-item .record-actions {
+    grid-column: 2 / -1;
+    justify-content: flex-start;
+  }
+}
+
+/* Current fix: Esc confirmation must stay clickable even after users shrink a pinned popup. */
+/* 本轮修复：置顶弹窗被用户缩小后，Esc 二次确认仍必须完整可点，不再被底部按钮层遮挡。 */
+.clipanchor-popup-body .popup-card.confirm-unpin-open .popup-actions {
+  opacity: 0 !important;
+  transform: translate3d(0, calc(100% + 14px), 0) !important;
+  pointer-events: none !important;
+}
+.clipanchor-popup-body .popup-card.confirm-unpin-open .popup-content {
+  opacity: .26 !important;
+  pointer-events: none !important;
+  filter: saturate(.82) blur(.4px) !important;
+}
+.clipanchor-popup-body .popup-card.confirm-unpin-open .popup-unpin-confirm,
+.clipanchor-popup-body .popup-unpin-confirm.open {
+  z-index: 90 !important;
+  top: 12px !important;
+  right: 12px !important;
+  bottom: 12px !important;
+  left: 12px !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  display: grid !important;
+  grid-template-rows: auto minmax(0, auto) auto !important;
+  align-content: center !important;
+  justify-content: stretch !important;
+  gap: 10px !important;
+  padding: 16px !important;
+  pointer-events: auto !important;
+}
+.clipanchor-popup-body .popup-unpin-confirm strong {
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+.clipanchor-popup-body .popup-unpin-confirm p {
+  white-space: normal !important;
+  overflow: hidden !important;
+  display: -webkit-box !important;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.clipanchor-popup-body .popup-unpin-confirm div {
+  min-width: 0 !important;
+  display: flex !important;
+  justify-content: flex-end !important;
+  flex-wrap: wrap !important;
+  gap: 8px !important;
+}
+.clipanchor-popup-body .popup-unpin-confirm button {
+  min-width: 68px !important;
+  height: 34px !important;
+}
+
+/* Esc 二次确认紧凑适配：保留用户调整后的弹窗尺寸，只禁用会自动唤起的底部操作栏。 */
+/* Esc confirmation compact-fit refinement: keep the original popup size and only disable the auto action bar. */
+.clipanchor-popup-body .popup-card.confirm-unpin-open {
+  overflow: hidden !important;
+}
+.clipanchor-popup-body .popup-card.confirm-unpin-open .popup-actions {
+  display: none !important;
+  pointer-events: none !important;
+}
+.clipanchor-popup-body .popup-card.confirm-unpin-open .popup-content {
+  opacity: .16 !important;
+  pointer-events: none !important;
+  filter: none !important;
+}
+.clipanchor-popup-body .popup-card.confirm-unpin-open .popup-unpin-confirm.open,
+.clipanchor-popup-body .popup-unpin-confirm.open {
+  position: absolute !important;
+  inset: 10px !important;
+  z-index: 120 !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  padding: 12px !important;
+  overflow: hidden !important;
+  pointer-events: auto !important;
+}
+.clipanchor-popup-body .popup-unpin-confirm.open strong {
+  display: -webkit-box !important;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden !important;
+  white-space: normal !important;
+  text-overflow: clip !important;
+  line-height: 1.18 !important;
+}
+.clipanchor-popup-body .popup-unpin-confirm.open p {
+  margin: 0 !important;
+  display: -webkit-box !important;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden !important;
+  line-height: 1.35 !important;
+}
+.clipanchor-popup-body .popup-unpin-confirm.open div {
+  display: flex !important;
+  justify-content: flex-end !important;
+  flex-wrap: nowrap !important;
+  gap: 8px !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+}
+.clipanchor-popup-body .popup-unpin-confirm.open button {
+  flex: 0 0 auto !important;
+  min-width: 74px !important;
+  height: 36px !important;
+  padding: 0 14px !important;
+}
+
+@media (max-height: 190px), (max-width: 340px) {
+  .clipanchor-popup-body .popup-card.confirm-unpin-open .popup-unpin-confirm.open,
+  .clipanchor-popup-body .popup-unpin-confirm.open {
+    inset: 8px !important;
+    gap: 8px !important;
+    padding: 12px !important;
+  }
+  .clipanchor-popup-body .popup-unpin-confirm.open p {
+    display: none !important;
+  }
+  .clipanchor-popup-body .popup-unpin-confirm.open strong {
+    -webkit-line-clamp: 1;
+    font-size: 18px !important;
+  }
+  .clipanchor-popup-body .popup-unpin-confirm.open div {
+    justify-content: flex-end !important;
+  }
+  .clipanchor-popup-body .popup-unpin-confirm.open button {
+    min-width: 70px !important;
+    height: 34px !important;
+  }
+}
+
+/* Final Esc confirmation layout refinement. */
+/* 最终 Esc 确认层修正：大尺寸弹窗保持右侧浮动确认卡，小尺寸弹窗才使用紧凑内嵌卡，避免拉大后变成难看的整行横幅。 */
+.clipanchor-popup-body .popup-card.confirm-unpin-open .popup-content {
+  opacity: .72 !important;
+  pointer-events: none !important;
+  filter: none !important;
+}
+.clipanchor-popup-body .popup-card.confirm-unpin-open .popup-actions {
+  display: none !important;
+  pointer-events: none !important;
+}
+.clipanchor-popup-body .popup-card.confirm-unpin-open .popup-unpin-confirm.open,
+.clipanchor-popup-body .popup-unpin-confirm.open {
+  position: absolute !important;
+  inset: auto 14px auto auto !important;
+  top: clamp(12px, 7vh, 28px) !important;
+  right: 14px !important;
+  bottom: auto !important;
+  left: auto !important;
+  width: clamp(260px, 28vw, 340px) !important;
+  min-width: 0 !important;
+  max-width: calc(100% - 28px) !important;
+  max-height: calc(100% - 28px) !important;
+  display: grid !important;
+  grid-template-rows: auto auto auto !important;
+  align-content: start !important;
+  justify-content: stretch !important;
+  gap: 10px !important;
+  padding: 16px !important;
+  border-radius: 22px !important;
+  overflow: hidden !important;
+  pointer-events: auto !important;
+}
+.clipanchor-popup-body .popup-unpin-confirm.open strong {
+  display: block !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+  text-overflow: ellipsis !important;
+  line-height: 1.22 !important;
+}
+.clipanchor-popup-body .popup-unpin-confirm.open p {
+  margin: 0 !important;
+  display: block !important;
+  overflow: hidden !important;
+  white-space: normal !important;
+  text-overflow: clip !important;
+  line-height: 1.45 !important;
+}
+.clipanchor-popup-body .popup-unpin-confirm.open div {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  flex-wrap: nowrap !important;
+  gap: 8px !important;
+  min-width: 0 !important;
+  margin: 2px 0 0 !important;
+}
+.clipanchor-popup-body .popup-unpin-confirm.open button {
+  flex: 0 0 auto !important;
+  min-width: 74px !important;
+  height: 36px !important;
+  padding: 0 14px !important;
+}
+
+@media (max-width: 380px), (max-height: 170px) {
+  /* 小尺寸时确认层必须优先保证按钮可点，所以退化为弹窗内部紧凑确认卡。 */
+  /* On very small popups, the confirmation falls back to an internal compact card so the buttons remain clickable. */
+  .clipanchor-popup-body .popup-card.confirm-unpin-open .popup-content {
+    opacity: .12 !important;
+  }
+  .clipanchor-popup-body .popup-card.confirm-unpin-open .popup-unpin-confirm.open,
+  .clipanchor-popup-body .popup-unpin-confirm.open {
+    inset: 8px !important;
+    width: auto !important;
+    max-width: none !important;
+    max-height: none !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    gap: 8px !important;
+    padding: 12px !important;
+  }
+  .clipanchor-popup-body .popup-unpin-confirm.open p {
+    display: none !important;
+  }
+  .clipanchor-popup-body .popup-unpin-confirm.open strong {
+    display: -webkit-box !important;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    white-space: normal !important;
+    font-size: 17px !important;
+  }
+  .clipanchor-popup-body .popup-unpin-confirm.open div {
+    justify-content: flex-end !important;
+  }
+  .clipanchor-popup-body .popup-unpin-confirm.open button {
+    min-width: 70px !important;
+    height: 34px !important;
+  }
+}

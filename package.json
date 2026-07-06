@@ -1,0 +1,26 @@
+{
+  "name": "clipanchor",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "tauri": "tauri",
+    "desktop:dev": "npm run tauri -- dev",
+    "desktop:build": "npm run tauri -- build && node scripts/collect-release.mjs"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "latest",
+    "@tauri-apps/plugin-dialog": "2.7.1",
+    "lucide-react": "latest",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "latest",
+    "@vitejs/plugin-react": "latest",
+    "esbuild": "^0.28.1",
+    "vite": "latest"
+  },
+  "license": "Apache-2.0"
+}

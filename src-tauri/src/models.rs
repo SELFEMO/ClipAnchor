@@ -1,0 +1,187 @@
+use crate::{paths, settings};
+use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, sync::{Arc, Mutex}};
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ClipKind {
+    Text,
+    Image,
+    File,
+    Mixed,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ClipItem {
+    pub id: String,
+    pub kind: ClipKind,
+    pub summary: String,
+    pub text_content: Option<String>,
+    pub image_path: Option<String>,
+    pub file_paths: Vec<String>,
+    pub bytes: i64,
+    pub created_at: String,
+    pub content_hash: String,
+    pub is_pinned: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HistoryRecord {
+    pub id: String,
+    pub kind: ClipKind,
+    pub summary: String,
+    pub text_content: Option<String>,
+    pub image_path: Option<String>,
+    pub file_paths: Vec<String>,
+    pub bytes: i64,
+    pub created_at: String,
+    pub content_hash: String,
+    pub is_pinned: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ShortcutSettings {
+    pub toggle_pin_service: String,
+    pub toggle_history_service: String,
+    pub toggle_main_window: String,
+    pub enter_light_mode: String,
+    pub toggle_theme_mode: String,
+}
+
+impl Default for ShortcutSettings {
+    fn default() -> Self {
+        Self {
+            toggle_pin_service: "Ctrl+Shift+P".into(),
+            toggle_history_service: "Ctrl+Shift+H".into(),
+            toggle_main_window: "Ctrl+Shift+X".into(),
+            enter_light_mode: "Ctrl+Shift+L".into(),
+            toggle_theme_mode: "Ctrl+Shift+T".into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AppSettings {
+    pub pin_service_enabled: bool,
+    pub history_service_enabled: bool,
+    pub privacy_mode: bool,
+    pub privacy_filter_mode: String,
+    pub auto_start: bool,
+    pub locale: String,
+    pub theme: String,
+    pub scale: String,
+    pub ui_scale_percent: u32,
+    pub light_mode_minutes: u64,
+    pub auto_hide_actions: bool,
+    pub auto_destroy_seconds: u64,
+    pub animation_mode: String,
+    pub popup_x: f64,
+    pub popup_y: f64,
+    pub popup_width: f64,
+    pub popup_height: f64,
+    pub popup_scale_percent: u32,
+    pub history_limit: u32,
+    pub log_retention_days: u32,
+    pub filter_text: bool,
+    pub filter_image: bool,
+    pub filter_file: bool,
+    pub shortcuts: ShortcutSettings,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            pin_service_enabled: true,
+            history_service_enabled: true,
+            privacy_mode: false,
+            privacy_filter_mode: "light".into(),
+            auto_start: false,
+            locale: "auto".into(),
+            theme: "system".into(),
+            scale: "medium".into(),
+            ui_scale_percent: 100,
+            light_mode_minutes: 5,
+            auto_hide_actions: true,
+            auto_destroy_seconds: 10,
+            animation_mode: "elegant".into(),
+            popup_x: 24.0,
+            popup_y: 24.0,
+            popup_width: 340.0,
+            popup_height: 220.0,
+            popup_scale_percent: 100,
+            history_limit: 0,
+            log_retention_days: 7,
+            filter_text: true,
+            filter_image: true,
+            filter_file: true,
+            shortcuts: ShortcutSettings::default(),
+        }
+    }
+}
+
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UpdateStatusPayload {
+    pub status: String,
+    pub service_enabled: bool,
+    pub update_available: bool,
+    pub update_failed: bool,
+    pub prompt_on_main_open: bool,
+    pub attention_required: bool,
+    pub checked_at: String,
+    pub source: String,
+}
+
+impl Default for UpdateStatusPayload {
+    fn default() -> Self {
+        Self {
+            status: "idle".into(),
+            service_enabled: false,
+            update_available: false,
+            update_failed: false,
+            prompt_on_main_open: false,
+            attention_required: false,
+            checked_at: String::new(),
+            source: "unknown".into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BootstrapPayload {
+    pub settings: AppSettings,
+    pub paths: PathPayload,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PathPayload {
+    pub data: String,
+    pub database: String,
+    pub resources: String,
+    pub logs: String,
+}
+
+#[derive(Clone)]
+pub struct AppState {
+    pub paths: paths::DataPaths,
+    pub settings: Arc<Mutex<AppSettings>>,
+    pub temp_items: Arc<Mutex<HashMap<String, ClipItem>>>,
+    pub monitor_stop: Arc<Mutex<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>>>,
+}
+
+impl AppState {
+    pub fn new() -> Result<Self, String> {
+        let paths = paths::resolve()?;
+        paths::ensure(&paths)?;
+        let loaded = settings::load(&paths).unwrap_or_default();
+        Ok(Self {
+            paths,
+            settings: Arc::new(Mutex::new(loaded)),
+            temp_items: Arc::new(Mutex::new(HashMap::new())),
+            monitor_stop: Arc::new(Mutex::new(None)),
+        })
+    }
+}

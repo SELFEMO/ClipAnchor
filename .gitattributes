@@ -1,0 +1,53 @@
+# Normalize text files so contributors on different systems do not create noisy line-ending changes.
+* text=auto eol=lf
+
+# Keep Windows scripts friendly to PowerShell on Windows.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Source files
+*.js text eol=lf
+*.jsx text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.rs text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.icns binary
+*.svg text eol=lf
+*.pdf binary
+
+# Build artifacts and installers must not be treated as text when attached outside the source tree.
+*.msi binary
+*.exe binary
+*.dmg binary
+*.app binary
+*.deb binary
+*.rpm binary
+*.AppImage binary
+*.zip binary
+*.7z binary
+*.tar binary
+*.gz binary
+
+# Keep generated and private folders out of source archives created from git.
+/release export-ignore
+/data export-ignore
+/node_modules export-ignore
+/dist export-ignore
+/target export-ignore
+/src-tauri/target export-ignore

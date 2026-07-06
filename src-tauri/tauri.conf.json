@@ -1,0 +1,69 @@
+{
+  "productName": "ClipAnchor",
+  "identifier": "com.clipanchor.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "ClipAnchor",
+        "width": 1240,
+        "height": 820,
+        "minWidth": 940,
+        "minHeight": 680,
+        "decorations": false,
+        "transparent": false,
+        "resizable": true,
+        "minimizable": true,
+        "maximizable": true,
+        "closable": true,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis",
+      "msi",
+      "app",
+      "dmg",
+      "deb",
+      "rpm"
+    ],
+    "category": "Utility",
+    "shortDescription": "Portable clipboard pinning tool",
+    "longDescription": "ClipAnchor keeps copied content in compact always-on-top popups and stores optional local history in a portable data directory.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico",
+      "icons/icon.icns"
+    ],
+    "windows": {
+      "nsis": {
+        "displayLanguageSelector": true,
+        "languages": [
+          "English",
+          "SimpChinese"
+        ],
+        "installerHooks": "./windows/nsis-language-selector.nsh"
+      },
+      "wix": {
+        "language": [
+          "en-US",
+          "zh-CN"
+        ]
+      }
+    }
+  }
+}

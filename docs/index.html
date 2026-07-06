@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="ClipAnchor is a portable clipboard pinning tool that turns copied text, images, and files into desktop popups with local history, favorites, privacy filtering, and app-local data." />
+  <meta name="theme-color" content="#08111f" />
+  <meta property="og:title" content="ClipAnchor · Portable Clipboard Pinning" />
+  <meta property="og:description" content="Pin clipboard text, images, and files as calm desktop cards. Keep local history, favorites, exports, and logs inside a portable data folder." />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="assets/clipanchor-icon.png" />
+  <link rel="icon" type="image/png" sizes="128x128" href="assets/clipanchor-icon.png" />
+  <link rel="shortcut icon" type="image/png" sizes="128x128" href="assets/clipanchor-icon.png" />
+  <link rel="apple-touch-icon" sizes="128x128" href="assets/clipanchor-icon.png" />
+  <title>ClipAnchor · Portable Clipboard Pinning</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7fbff;
+      --bg-soft: #edf4fb;
+      --text: #0b1220;
+      --muted: #5e6b7e;
+      --subtle: #7b8798;
+      --line: rgba(12, 24, 42, .12);
+      --card: rgba(255, 255, 255, .78);
+      --card-strong: rgba(255, 255, 255, .94);
+      --blue: #319FFF;
+      --coral: #F4A9AA;
+      --green: #5ad391;
+      --shadow: rgba(32, 50, 72, .13);
+      --shadow-strong: rgba(22, 34, 54, .18);
+      --radius-lg: 34px;
+      --radius-md: 24px;
+      --radius-sm: 16px;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    html.dark {
+      color-scheme: dark;
+      --bg: #08111f;
+      --bg-soft: #0e1726;
+      --text: #f6f8fb;
+      --muted: #a8b3c4;
+      --subtle: #78859a;
+      --line: rgba(255, 255, 255, .13);
+      --card: rgba(16, 24, 38, .76);
+      --card-strong: rgba(18, 27, 43, .92);
+      --shadow: rgba(0, 0, 0, .32);
+      --shadow-strong: rgba(0, 0, 0, .42);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      overflow-x: hidden;
+      background:
+        radial-gradient(circle at 14% -8%, rgba(49, 159, 255, .22), transparent 36%),
+        radial-gradient(circle at 86% 4%, rgba(244, 169, 170, .19), transparent 34%),
+        linear-gradient(180deg, var(--bg), var(--bg-soft) 58%, var(--bg));
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image: linear-gradient(rgba(255,255,255,.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px);
+      background-size: 44px 44px;
+      mask-image: radial-gradient(circle at 50% 18%, black, transparent 72%);
+      opacity: .42;
+    }
+    a { color: inherit; text-decoration: none; }
+    button, .btn {
+      border: 1px solid var(--line);
+      background: var(--card-strong);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 11px 17px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 42px;
+      font: inherit;
+      font-weight: 800;
+      cursor: pointer;
+      box-shadow: 0 12px 34px var(--shadow);
+      transition: transform .22s ease, box-shadow .22s ease, border-color .22s ease, background .22s ease;
+    }
+    button:hover, .btn:hover { transform: translateY(-1px); border-color: color-mix(in srgb, var(--blue), var(--line) 52%); box-shadow: 0 18px 46px var(--shadow-strong); }
+    .primary { color: #fff; border: 0; background: linear-gradient(135deg, var(--blue), var(--coral)); box-shadow: 0 20px 56px rgba(49, 159, 255, .26); }
+    .ghost { background: color-mix(in srgb, var(--card), transparent 12%); }
+    .wrap { width: min(1160px, calc(100% - 48px)); margin-inline: auto; }
+    .glass { border: 1px solid var(--line); background: linear-gradient(145deg, var(--card), color-mix(in srgb, var(--card), transparent 34%)); backdrop-filter: blur(26px) saturate(150%); box-shadow: 0 30px 90px var(--shadow), inset 0 1px 0 rgba(255,255,255,.16); }
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      min-height: 72px;
+      backdrop-filter: blur(24px) saturate(150%);
+      background: color-mix(in srgb, var(--bg), transparent 18%);
+      border-bottom: 1px solid var(--line);
+    }
+    .nav-inner { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 14px 0; }
+    .brand { display: flex; align-items: center; gap: 11px; font-weight: 950; letter-spacing: -.045em; }
+    .logo-mark { width: 38px; height: 38px; border-radius: 13px; overflow: hidden; box-shadow: 0 12px 28px rgba(49,159,255,.25); }
+    .logo-mark img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .brand small { display: block; color: var(--subtle); font-size: 12px; font-weight: 800; letter-spacing: 0; margin-top: -2px; }
+    .actions { display: flex; align-items: center; gap: 9px; }
+    .nav-link { color: var(--muted); font-size: 13px; font-weight: 800; }
+    .pill-button { min-width: 42px; height: 38px; padding: 0 13px; }
+    .theme-toggle { width: 42px; padding: 0; font-size: 17px; }
+    .hero {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(0, .94fr) minmax(360px, .86fr);
+      gap: 40px;
+      align-items: center;
+      padding: 88px 0 64px;
+    }
+    .kicker { display: inline-flex; gap: 9px; align-items: center; margin-bottom: 18px; color: var(--blue); font-weight: 950; font-size: 12px; letter-spacing: .16em; text-transform: uppercase; }
+    h1 { margin: 0; max-width: 680px; font-size: clamp(40px, 5.5vw, 74px); line-height: .97; letter-spacing: -.065em; text-wrap: balance; }
+    h2 { margin: 0 0 14px; font-size: clamp(28px, 3.2vw, 44px); line-height: 1.05; letter-spacing: -.052em; text-wrap: balance; }
+    h3 { margin: 0; letter-spacing: -.026em; font-size: 18px; line-height: 1.22; }
+    .lead { max-width: 640px; margin: 22px 0 0; color: var(--muted); font-size: 17px; line-height: 1.66; }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
+    .trust-row { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 22px; }
+    .pill { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 8px 12px; color: var(--muted); font-size: 12px; font-weight: 800; backdrop-filter: blur(18px); }
+    .product-stage { position: relative; min-height: 560px; perspective: 900px; isolation: isolate; }
+    .product-stage::before { content: ""; position: absolute; width: 88%; height: 82%; left: 7%; top: 8%; border-radius: 44px; background: radial-gradient(circle at 25% 20%, rgba(49,159,255,.24), transparent 34%), radial-gradient(circle at 76% 68%, rgba(244,169,170,.20), transparent 34%); filter: blur(14px); z-index: -1; }
+    .app-window { position: absolute; inset: 42px 8px auto 28px; height: 430px; border-radius: 36px; padding: 22px; transform: rotateY(-9deg) rotateX(4deg); overflow: hidden; }
+    .app-sidebar { position: absolute; left: 22px; top: 22px; bottom: 22px; width: 108px; border-radius: 28px; background: linear-gradient(180deg, rgba(49,159,255,.20), rgba(255,255,255,.045)); border: 1px solid var(--line); }
+    .app-sidebar::before, .app-sidebar::after { content: ""; position: absolute; left: 18px; right: 18px; height: 10px; border-radius: 999px; background: color-mix(in srgb, var(--text), transparent 84%); }
+    .app-sidebar::before { top: 74px; } .app-sidebar::after { top: 106px; opacity: .62; }
+    .app-list { position: absolute; left: 152px; right: 22px; top: 86px; bottom: 22px; border-radius: 28px; background: linear-gradient(145deg, rgba(49,159,255,.12), rgba(244,169,170,.06)); border: 1px solid var(--line); padding: 18px; display: grid; gap: 12px; align-content: start; }
+    .fake-search { position: absolute; left: 152px; right: 22px; top: 22px; height: 46px; border-radius: 18px; background: color-mix(in srgb, var(--text), transparent 92%); border: 1px solid var(--line); }
+    .fake-row { height: 52px; border-radius: 18px; background: color-mix(in srgb, var(--card-strong), transparent 16%); border: 1px solid var(--line); display: flex; align-items: center; gap: 12px; padding: 0 14px; }
+    .fake-row::before { content: ""; width: 28px; height: 28px; border-radius: 10px; background: linear-gradient(135deg, var(--blue), var(--coral)); opacity: .9; }
+    .fake-row::after { content: ""; height: 10px; flex: 1; max-width: 260px; border-radius: 999px; background: color-mix(in srgb, var(--text), transparent 84%); }
+    .popup-card { position: absolute; right: 0; top: 118px; width: 330px; border-radius: 28px; padding: 20px; animation: float 6s ease-in-out infinite; }
+    .popup-card.two { left: 0; right: auto; top: 330px; width: 310px; animation-delay: -2.7s; }
+    .popup-card strong { display: block; margin-bottom: 8px; font-size: 15px; letter-spacing: -.02em; }
+    .popup-actions { display: flex; gap: 10px; margin-top: 16px; }
+    .mini-button { height: 32px; min-width: 66px; border-radius: 13px; display: grid; place-items: center; background: color-mix(in srgb, var(--text), transparent 91%); border: 1px solid var(--line); color: var(--muted); font-size: 12px; font-weight: 900; }
+    .thumb { height: 112px; border-radius: 22px; margin: 14px 0; background: linear-gradient(135deg, var(--blue), var(--coral)); position: relative; overflow: hidden; }
+    .thumb::after { content: ""; position: absolute; inset: 18px; border-radius: 18px; background: rgba(255,255,255,.24); transform: rotate(-8deg); }
+    .section { padding: 64px 0; }
+    .section-head { max-width: 780px; margin-bottom: 28px; }
+    .muted { color: var(--muted); line-height: 1.65; }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+    .feature { min-height: 206px; border-radius: 28px; padding: 23px; transition: transform .24s ease, border-color .24s ease; }
+    .feature:hover { transform: translateY(-4px); border-color: color-mix(in srgb, var(--blue), var(--line) 54%); }
+    .feature-title { display: flex; align-items: center; gap: 11px; margin-bottom: 12px; }
+    .feature-icon { width: 36px; height: 36px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 13px; color: #fff; background: linear-gradient(135deg, var(--blue), var(--coral)); box-shadow: 0 12px 28px rgba(49,159,255,.22); font-weight: 950; }
+    .flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+    .step { position: relative; border-radius: 26px; padding: 22px; min-height: 188px; }
+    .step-number { width: 34px; height: 34px; border-radius: 13px; display: grid; place-items: center; margin-bottom: 16px; background: linear-gradient(135deg, var(--blue), var(--coral)); color: #fff; font-weight: 950; }
+    .split-panel { display: grid; grid-template-columns: .9fr 1.1fr; gap: 26px; align-items: center; border-radius: var(--radius-lg); padding: 30px; }
+    .stack { display: grid; gap: 14px; }
+    .callout { border-radius: 24px; padding: 20px; background: color-mix(in srgb, var(--card-strong), transparent 10%); border: 1px solid var(--line); }
+    .callout strong { display: block; margin-bottom: 7px; font-size: 17px; }
+    .download-panel { display: grid; grid-template-columns: 1fr auto; gap: 22px; align-items: center; border-radius: var(--radius-lg); padding: 30px; }
+    .artifact-list { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+    details { border-radius: 21px; padding: 18px 20px; margin: 10px 0; }
+    summary { cursor: pointer; font-weight: 900; font-size: 15px; }
+    footer { padding: 34px 24px 58px; text-align: center; color: var(--muted); font-size: 14px; }
+    html[data-lang="zh"] h1, html[data-lang="zh"] h2 { line-break: strict; }
+    html[data-lang="zh"] .hero h1 { max-width: 640px; letter-spacing: -.058em; }
+    @keyframes float { 50% { transform: translateY(-16px); } }
+    @media (max-width: 980px) {
+      .nav-link { display: none; }
+      .hero, .split-panel, .download-panel { grid-template-columns: 1fr; }
+      .product-stage { width: min(620px, 100%); margin: 8px auto 0; min-height: 470px; }
+      .app-window { inset: 28px 16px auto 16px; height: 382px; transform: none; }
+      .popup-card { width: min(330px, 74%); right: 18px; top: 96px; }
+      .popup-card.two { width: min(310px, 72%); left: 18px; top: 274px; }
+      .grid { grid-template-columns: 1fr 1fr; }
+      .flow { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 640px) {
+      .wrap { width: calc(100% - 32px); }
+      .nav-inner { flex-wrap: wrap; }
+      .brand { width: 100%; }
+      .actions { width: 100%; flex-wrap: wrap; justify-content: flex-start; }
+      .actions .primary { flex: 1; }
+      .hero { padding: 56px 0 44px; }
+      h1 { font-size: clamp(34px, 10vw, 50px); line-height: 1.02; }
+      .lead { font-size: 15px; }
+      .grid, .flow { grid-template-columns: 1fr; }
+      .section { padding: 44px 0; }
+      .product-stage { min-height: 390px; overflow: hidden; border-radius: 34px; }
+      .app-window { inset: 18px 0 auto 0; height: 326px; border-radius: 30px; }
+      .app-sidebar { width: 74px; }
+      .fake-search { left: 112px; right: 16px; }
+      .app-list { left: 112px; right: 16px; }
+      .popup-card { top: 76px; right: 10px; width: min(282px, 78%); padding: 16px; }
+      .popup-card.two { top: 230px; left: 10px; width: min(268px, 76%); padding: 16px; }
+      .thumb { height: 86px; }
+      .split-panel, .download-panel { padding: 22px; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <div class="wrap nav-inner">
+      <a class="brand" href="#top" aria-label="ClipAnchor home">
+        <span class="logo-mark"><img src="assets/clipanchor-icon.png" alt="ClipAnchor logo" /></span>
+        <span>ClipAnchor<small>剪贴锚</small></span>
+      </a>
+      <div class="actions">
+        <a class="nav-link" href="#features" data-i18n="navFeatures">Features</a>
+        <a class="nav-link" href="#workflow" data-i18n="navWorkflow">Workflow</a>
+        <a class="nav-link" href="#privacy" data-i18n="navPrivacy">Privacy</a>
+        <a class="nav-link" href="#download" data-i18n="navDownload">Download</a>
+        <a class="nav-link" href="#faq" data-i18n="navFaq">FAQ</a>
+        <button id="langButton" class="pill-button" aria-label="Switch language"><span data-i18n="langButton">中文</span></button>
+        <button id="themeButton" class="pill-button theme-toggle" aria-label="Switch color mode"><span id="themeIcon">◐</span></button>
+        <a class="btn primary" href="#download" data-i18n="downloadCta">Download</a>
+      </div>
+    </div>
+  </nav>
+  <main id="top">
+    <section class="wrap hero">
+      <div>
+        <span class="kicker" data-i18n="kicker">Portable clipboard pinning</span>
+        <h1 data-i18n="heroTitle">Anchor the clips you need right now.</h1>
+        <p class="lead" data-i18n="heroBody">ClipAnchor turns copied text, images, and files into calm desktop cards. Pin a snippet above your work, recall local history, protect favorites, and keep runtime data beside the app.</p>
+        <div class="hero-actions">
+          <a class="btn primary" href="#download" data-i18n="heroPrimary">Get ClipAnchor</a>
+          <a class="btn ghost" href="#workflow" data-i18n="heroSecondary">See the workflow</a>
+        </div>
+        <div class="trust-row">
+          <span class="pill" data-i18n="pillLite">Silent startup Lite mode</span>
+          <span class="pill" data-i18n="pillLocal">Local SQLite history</span>
+          <span class="pill" data-i18n="pillCsv">JSON and CSV export</span>
+        </div>
+      </div>
+      <div class="product-stage" aria-label="ClipAnchor product preview">
+        <div class="app-window glass">
+          <div class="app-sidebar"></div>
+          <div class="fake-search"></div>
+          <div class="app-list"><span class="fake-row"></span><span class="fake-row"></span><span class="fake-row"></span></div>
+        </div>
+        <div class="popup-card glass">
+          <strong data-i18n="popupTextTitle">Pinned text</strong>
+          <p class="muted" data-i18n="popupTextBody">Keep a useful snippet visible while the current app keeps focus.</p>
+          <div class="popup-actions"><span class="mini-button">Pin</span><span class="mini-button">Copy</span></div>
+        </div>
+        <div class="popup-card two glass">
+          <strong data-i18n="popupImageTitle">Image or file captured</strong>
+          <div class="thumb"></div>
+          <div class="popup-actions"><span class="mini-button">★</span><span class="mini-button">Unpin</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features" class="wrap section">
+      <div class="section-head">
+        <h2 data-i18n="featuresTitle">Designed around the real clipboard loop.</h2>
+        <p class="muted" data-i18n="featuresBody">Copying is fast, but finding, keeping, and reusing copied content is usually not. ClipAnchor adds a small desktop layer for the content that matters.</p>
+      </div>
+      <div class="grid">
+        <article class="feature glass"><div class="feature-title"><span class="feature-icon">▣</span><h3 data-i18n="f1Title">Independent popups</h3></div><p class="muted" data-i18n="f1Body">Every copy can create a separate popup with stacking, auto-destroy, Pin, Copy, Unpin, drag, and resize for pinned cards.</p></article>
+        <article class="feature glass"><div class="feature-title"><span class="feature-icon">⌘</span><h3 data-i18n="f2Title">History to desktop</h3></div><p class="muted" data-i18n="f2Body">Search local history by text or type, then pin any record back to the desktop without copying it again.</p></article>
+        <article class="feature glass"><div class="feature-title"><span class="feature-icon">★</span><h3 data-i18n="f3Title">Favorites stay protected</h3></div><p class="muted" data-i18n="f3Body">Favorite records remain visible in normal history, appear in their own view, and are kept during regular cleanup.</p></article>
+        <article class="feature glass"><div class="feature-title"><span class="feature-icon">◒</span><h3 data-i18n="f4Title">Quiet Lite mode</h3></div><p class="muted" data-i18n="f4Body">Launch at startup without showing the main window. Tray, clipboard monitoring, and storage continue silently in the background.</p></article>
+        <article class="feature glass"><div class="feature-title"><span class="feature-icon">◈</span><h3 data-i18n="f5Title">Portable data</h3></div><p class="muted" data-i18n="f5Body">History, settings, resources, exports, and rotated logs stay in the app-local data folder for simple backup and migration.</p></article>
+        <article class="feature glass"><div class="feature-title"><span class="feature-icon">⌁</span><h3 data-i18n="f6Title">System-matched UI</h3></div><p class="muted" data-i18n="f6Body">Dark, light, and system themes sync across the main window and popup windows, with scale and animation controls.</p></article>
+      </div>
+    </section>
+
+    <section id="workflow" class="wrap section">
+      <div class="section-head">
+        <h2 data-i18n="workflowTitle">From copy to pinned workspace in four steps.</h2>
+        <p class="muted" data-i18n="workflowBody">ClipAnchor stays out of the way until copied content needs to stay visible, be found again, or be protected from cleanup.</p>
+      </div>
+      <div class="flow">
+        <article class="step glass"><div class="step-number">1</div><h3 data-i18n="s1Title">Copy normally</h3><p class="muted" data-i18n="s1Body">Text, images, files, folders, and mixed file selections are captured by the local clipboard service.</p></article>
+        <article class="step glass"><div class="step-number">2</div><h3 data-i18n="s2Title">Review the popup</h3><p class="muted" data-i18n="s2Body">Cards appear without stealing focus and auto-hide actions until you hover or interact.</p></article>
+        <article class="step glass"><div class="step-number">3</div><h3 data-i18n="s3Title">Pin what matters</h3><p class="muted" data-i18n="s3Body">Pinned cards stay above other windows and can be copied, edited for text, favorited, moved, resized, or unpinned.</p></article>
+        <article class="step glass"><div class="step-number">4</div><h3 data-i18n="s4Title">Manage later</h3><p class="muted" data-i18n="s4Body">Use history filters, favorites, JSON/CSV export, age cleanup, and log management from Settings.</p></article>
+      </div>
+    </section>
+
+    <section id="privacy" class="wrap section">
+      <div class="split-panel glass">
+        <div>
+          <h2 data-i18n="privacyTitle">Local first, with maintenance controls.</h2>
+          <p class="muted" data-i18n="privacyBody">ClipAnchor is built as a desktop utility, not a cloud clipboard. Sensitive content filtering, pause controls, and local logs help keep behavior understandable when you need to troubleshoot.</p>
+        </div>
+        <div class="stack">
+          <div class="callout"><strong data-i18n="p1Title">Sensitive content filter</strong><p class="muted" data-i18n="p1Body">Light mode uses local rules to avoid storing likely passwords, keys, IDs, tokens, and similar text.</p></div>
+          <div class="callout"><strong data-i18n="p2Title">Rotated runtime logs</strong><p class="muted" data-i18n="p2Body">Logs record service, tray, popup, shortcut, data, and error events. Clipboard body text is not written to logs.</p></div>
+          <div class="callout"><strong data-i18n="p3Title">One running instance</strong><p class="muted" data-i18n="p3Body">Starting ClipAnchor again activates the existing main window instead of leaving another long-running process.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="download" class="wrap section">
+      <div class="download-panel glass">
+        <div>
+          <h2 data-i18n="downloadTitle">Download from the software repository.</h2>
+          <p class="muted" data-i18n="downloadBody">Release packages are distributed through the official software repository. Automatic update service is not open yet, so please download new installers or portable packages manually when a new release is published.</p>
+          <div class="artifact-list">
+            <span class="pill">Windows · MSI / EXE</span>
+            <span class="pill">macOS · APP / DMG</span>
+            <span class="pill">Linux · DEB / RPM</span>
+            <span class="pill" data-i18n="cliVersion">CLI: --version / -V</span>
+          </div>
+        </div>
+        <a class="btn primary" href="#download" data-i18n="downloadCta">Download</a>
+      </div>
+    </section>
+
+    <section id="faq" class="wrap section">
+      <h2 data-i18n="faqTitle">FAQ</h2>
+      <details class="glass"><summary data-i18n="q1">Where is my data stored?</summary><p class="muted" data-i18n="a1">All runtime data is stored under the app-local data folder, including clipanchor.db, settings, resources, exports, and logs.</p></details>
+      <details class="glass"><summary data-i18n="q2">What happens at system startup?</summary><p class="muted" data-i18n="a2">ClipAnchor starts in Lite mode by default. The main window stays hidden while tray, monitoring, and storage services keep running.</p></details>
+      <details class="glass"><summary data-i18n="q3">Can I export history?</summary><p class="muted" data-i18n="a3">Yes. JSON export keeps full data, and CSV export includes record metadata such as type, paths, timestamps, size, hash, and favorite state.</p></details>
+      <details class="glass"><summary data-i18n="q4">How do language and color mode work?</summary><p class="muted" data-i18n="a4">The page follows your system language and color mode on first visit. Manual choices are remembered locally in your browser.</p></details>
+    </section>
+  </main>
+  <footer data-i18n="footer">ClipAnchor · Portable clipboard pinning for modern desktops</footer>
+  <script>
+    const translations = {
+      en: {
+        navFeatures: 'Features', navWorkflow: 'Workflow', navPrivacy: 'Privacy', navDownload: 'Download', navFaq: 'FAQ', langButton: '中文',
+        kicker: 'Portable clipboard pinning', heroTitle: 'Anchor the clips you need right now.',
+        heroBody: 'ClipAnchor turns copied text, images, and files into calm desktop cards. Pin a snippet above your work, recall local history, protect favorites, and keep runtime data beside the app.',
+        heroPrimary: 'Get ClipAnchor', heroSecondary: 'See the workflow', pillLite: 'Silent startup Lite mode', pillLocal: 'Local SQLite history', pillCsv: 'JSON and CSV export',
+        popupTextTitle: 'Pinned text', popupTextBody: 'Keep a useful snippet visible while the current app keeps focus.', popupImageTitle: 'Image or file captured',
+        featuresTitle: 'Designed around the real clipboard loop.', featuresBody: 'Copying is fast, but finding, keeping, and reusing copied content is usually not. ClipAnchor adds a small desktop layer for the content that matters.',
+        f1Title: 'Independent popups', f1Body: 'Every copy can create a separate popup with stacking, auto-destroy, Pin, Copy, Unpin, drag, and resize for pinned cards.',
+        f2Title: 'History to desktop', f2Body: 'Search local history by text or type, then pin any record back to the desktop without copying it again.',
+        f3Title: 'Favorites stay protected', f3Body: 'Favorite records remain visible in normal history, appear in their own view, and are kept during regular cleanup.',
+        f4Title: 'Quiet Lite mode', f4Body: 'Launch at startup without showing the main window. Tray, clipboard monitoring, and storage continue silently in the background.',
+        f5Title: 'Portable data', f5Body: 'History, settings, resources, exports, and rotated logs stay in the app-local data folder for simple backup and migration.',
+        f6Title: 'System-matched UI', f6Body: 'Dark, light, and system themes sync across the main window and popup windows, with scale and animation controls.',
+        workflowTitle: 'From copy to pinned workspace in four steps.', workflowBody: 'ClipAnchor stays out of the way until copied content needs to stay visible, be found again, or be protected from cleanup.',
+        s1Title: 'Copy normally', s1Body: 'Text, images, files, folders, and mixed file selections are captured by the local clipboard service.',
+        s2Title: 'Review the popup', s2Body: 'Cards appear without stealing focus and auto-hide actions until you hover or interact.',
+        s3Title: 'Pin what matters', s3Body: 'Pinned cards stay above other windows and can be copied, edited for text, favorited, moved, resized, or unpinned.',
+        s4Title: 'Manage later', s4Body: 'Use history filters, favorites, JSON/CSV export, age cleanup, and log management from Settings.',
+        privacyTitle: 'Local first, with maintenance controls.', privacyBody: 'ClipAnchor is built as a desktop utility, not a cloud clipboard. Sensitive content filtering, pause controls, and local logs help keep behavior understandable when you need to troubleshoot.',
+        p1Title: 'Sensitive content filter', p1Body: 'Light mode uses local rules to avoid storing likely passwords, keys, IDs, tokens, and similar text.',
+        p2Title: 'Rotated runtime logs', p2Body: 'Logs record service, tray, popup, shortcut, data, and error events. Clipboard body text is not written to logs.',
+        p3Title: 'One running instance', p3Body: 'Starting ClipAnchor again activates the existing main window instead of leaving another long-running process.',
+        downloadTitle: 'Download from the software repository.', downloadBody: 'Release packages are distributed through the official software repository. Automatic update service is not open yet, so please download new installers or portable packages manually when a new release is published.',
+        downloadCta: 'Download', cliVersion: 'CLI: --version / -V', faqTitle: 'FAQ',
+        q1: 'Where is my data stored?', a1: 'All runtime data is stored under the app-local data folder, including clipanchor.db, settings, resources, exports, and logs.',
+        q2: 'What happens at system startup?', a2: 'ClipAnchor starts in Lite mode by default. The main window stays hidden while tray, monitoring, and storage services keep running.',
+        q3: 'Can I export history?', a3: 'Yes. JSON export keeps full data, and CSV export includes record metadata such as type, paths, timestamps, size, hash, and favorite state.',
+        q4: 'How do language and color mode work?', a4: 'The page follows your system language and color mode on first visit. Manual choices are remembered locally in your browser.',
+        footer: 'ClipAnchor · Portable clipboard pinning for modern desktops', darkMode: 'Dark mode', lightMode: 'Light mode'
+      },
+      zh: {
+        navFeatures: '功能', navWorkflow: '流程', navPrivacy: '隐私', navDownload: '下载', navFaq: '常见问题', langButton: 'EN',
+        kicker: '便携式剪贴板置顶工具', heroTitle: '把正在用的剪贴内容锚定在桌面。',
+        heroBody: 'ClipAnchor（剪贴锚）会把复制的文本、图片和文件转成安静的桌面卡片。需要时置顶，稍后从本地历史复用，收藏重要内容，并把运行数据保存在软件同级目录。',
+        heroPrimary: '获取 ClipAnchor', heroSecondary: '查看使用流程', pillLite: '开机静默轻量模式', pillLocal: '本地 SQLite 历史', pillCsv: 'JSON 与 CSV 导出',
+        popupTextTitle: '文本已置顶', popupTextBody: '让常用片段保持可见，同时不抢走当前应用焦点。', popupImageTitle: '图片或文件已捕获',
+        featuresTitle: '围绕真实复制流程设计。', featuresBody: '复制本身很快，但找回、保留和再次使用复制内容并不总是顺手。ClipAnchor 为重要内容增加一层轻量桌面工作区。',
+        f1Title: '独立弹窗', f1Body: '每次复制都可以生成独立弹窗，支持堆叠、自动销毁、Pin、Copy、Unpin、拖动和置顶后调节大小。',
+        f2Title: '从历史回到桌面', f2Body: '按文本或类型搜索本地历史，并把任意记录直接重新生成桌面置顶弹窗。',
+        f3Title: '收藏内容受保护', f3Body: '收藏记录会保留在普通历史中，也会显示在收藏视图，常规清理默认不会删除。',
+        f4Title: '安静的轻量模式', f4Body: '开机自启动时不显示主窗口，托盘、剪贴板监听和存储服务在后台静默运行。',
+        f5Title: '便携数据', f5Body: '历史、设置、资源、导出文件和轮转日志都保存在软件同级 data 文件夹，便于备份和迁移。',
+        f6Title: '跟随系统的界面', f6Body: '深色、浅色和跟随系统主题会同步到主界面和弹窗，同时支持缩放和动画模式设置。',
+        workflowTitle: '从复制到桌面置顶，只需四步。', workflowBody: 'ClipAnchor 平时尽量不打扰。只有当内容需要保持可见、稍后找回或避免被清理时，它才提供额外操作。',
+        s1Title: '正常复制', s1Body: '文本、图片、文件、文件夹和多文件选择会被本地剪贴板服务捕获。',
+        s2Title: '查看弹窗', s2Body: '弹窗出现时不抢焦点，操作按钮默认隐藏，只有悬停或交互时才显示。',
+        s3Title: '置顶重要内容', s3Body: '置顶后可复制、编辑文本、收藏、拖动、调节大小或取消置顶。',
+        s4Title: '稍后管理', s4Body: '在设置中使用历史筛选、收藏、JSON/CSV 导出、按天清理和日志管理。',
+        privacyTitle: '本地优先，也便于维护。', privacyBody: 'ClipAnchor 是桌面工具，不是云剪贴板。敏感内容过滤、暂停监听和本地日志让行为更可控，也便于定位问题。',
+        p1Title: '敏感内容过滤', p1Body: '轻量模式会用本地规则避免保存疑似密码、密钥、证件号、令牌等文本。',
+        p2Title: '轮转运行日志', p2Body: '日志记录服务、托盘、弹窗、快捷键、数据和错误事件，不写入剪贴板正文。',
+        p3Title: '单实例运行', p3Body: '再次启动 ClipAnchor 会激活已有主窗口，不会留下第二个长期运行进程。',
+        downloadTitle: '从软件下载仓库获取。', downloadBody: '发布包通过官方软件下载仓库分发。自动更新服务暂未开放，请在新版本发布后手动下载新版安装包或便携包。',
+        downloadCta: '下载', cliVersion: '命令行：--version / -V', faqTitle: '常见问题',
+        q1: '我的数据存在哪里？', a1: '所有运行数据都保存在软件同级 data 文件夹，包括 clipanchor.db、设置、资源、导出文件和日志。',
+        q2: '开机自启动时会发生什么？', a2: 'ClipAnchor 默认进入轻量模式。主窗口保持隐藏，托盘、监听和存储服务继续在后台运行。',
+        q3: '可以导出历史记录吗？', a3: '可以。JSON 导出保留完整数据，CSV 导出包含类型、路径、时间、大小、哈希和收藏状态等记录属性。',
+        q4: '语言和深浅模式如何工作？', a4: '首次访问时网页会跟随系统语言和系统深浅模式。手动切换后，偏好会保存在浏览器本地。',
+        footer: 'ClipAnchor · 面向现代桌面的便携剪贴板置顶工具', darkMode: '深色模式', lightMode: '浅色模式'
+      }
+    };
+
+    const languageStoreKey = 'clipanchor-docs-lang';
+    const themeStoreKey = 'clipanchor-docs-theme';
+    const systemLanguage = (navigator.language || navigator.userLanguage || 'en').toLowerCase();
+    let currentLang = localStorage.getItem(languageStoreKey) || (systemLanguage.startsWith('zh') ? 'zh' : 'en');
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)');
+
+    function applyLanguage(lang, persist = true) {
+      currentLang = lang;
+      document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+      document.documentElement.dataset.lang = lang;
+      if (persist) localStorage.setItem(languageStoreKey, lang);
+      const dict = translations[lang];
+      document.querySelectorAll('[data-i18n]').forEach((node) => {
+        const key = node.getAttribute('data-i18n');
+        if (dict[key]) node.textContent = dict[key];
+      });
+      document.title = lang === 'zh' ? 'ClipAnchor（剪贴锚）· 便携剪贴板置顶工具' : 'ClipAnchor · Portable Clipboard Pinning';
+      document.querySelector('meta[name="description"]').setAttribute('content', lang === 'zh'
+        ? 'ClipAnchor（剪贴锚）是一款便携式剪贴板置顶工具，可将文本、图片和文件转为桌面弹窗，并提供本地历史、收藏、隐私过滤和数据管理。'
+        : 'ClipAnchor is a portable clipboard pinning tool that turns copied text, images, and files into desktop popups with local history, favorites, privacy filtering, and app-local data.');
+      updateThemeButton();
+    }
+
+    function applyTheme(dark, persist = true) {
+      document.documentElement.classList.toggle('dark', dark);
+      if (persist) localStorage.setItem(themeStoreKey, dark ? 'dark' : 'light');
+      document.querySelector('meta[name="theme-color"]').setAttribute('content', dark ? '#08111f' : '#319FFF');
+      updateThemeButton();
+    }
+
+    function updateThemeButton() {
+      const dict = translations[currentLang];
+      const isDark = document.documentElement.classList.contains('dark');
+      document.getElementById('themeIcon').textContent = isDark ? '☀' : '◐';
+      document.getElementById('themeButton').title = isDark ? dict.lightMode : dict.darkMode;
+    }
+
+    document.getElementById('langButton').addEventListener('click', () => applyLanguage(currentLang === 'zh' ? 'en' : 'zh'));
+    document.getElementById('themeButton').addEventListener('click', () => applyTheme(!document.documentElement.classList.contains('dark')));
+    prefersDark.addEventListener('change', (event) => {
+      if (!localStorage.getItem(themeStoreKey)) applyTheme(event.matches, false);
+    });
+
+    applyTheme(localStorage.getItem(themeStoreKey) ? localStorage.getItem(themeStoreKey) === 'dark' : prefersDark.matches, false);
+    applyLanguage(currentLang, false);
+  </script>
+</body>
+</html>

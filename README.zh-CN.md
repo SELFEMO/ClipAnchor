@@ -1,0 +1,117 @@
+<div align="center">
+  <img src="src-tauri/icons/128x128.png" width="92" height="92" alt="ClipAnchor logo" />
+  <h1>ClipAnchor · 剪贴锚</h1>
+  <p><strong>便携、安静、可置顶的跨平台剪贴板工作台</strong></p>
+  <p><a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a></p>
+</div>
+
+## 项目简介
+
+ClipAnchor 是一个使用 Rust、Tauri 与 React 构建的跨平台剪贴板置顶工具。它会在后台监听文本、图片和文件复制行为，把内容整理成轻量桌面弹窗，并把非敏感内容写入本地历史记录。重要内容可以收藏、再次置顶、复制回剪贴板，也可以在历史列表中快速搜索和管理。
+
+
+ClipAnchor 的核心目标是“便携”和“安静”：数据默认保存在程序同级 `data/` 目录内，便于备份和迁移；开机自启动时默认进入后台轻量模式，不弹出主界面，只保留托盘图标、剪贴板监听和数据库服务。
+
+## 项目结构
+
+| 路径 | 作用 |
+|---|---|
+| `src/index.html` | 主应用的 Vite 入口。源码入口放在 `src/` 内，构建后仍会输出为 `dist/index.html`，供 Tauri 主窗口和弹窗加载。 |
+| `src/` | React 前端，包括主界面、剪贴板页、设置页、弹窗页、接口封装和全局样式。 |
+| `src-tauri/` | Rust/Tauri 后端，包括剪贴板监听、数据库、托盘、自启动、快捷键、单实例和窗口控制。 |
+| `data/` | 便携数据目录，用于保存数据库、设置、资源、导出文件和日志。 |
+| `docs/index.html` | 独立官网页面，用于 GitHub Pages 或静态托管，不参与桌面应用运行。 |
+| `scripts/` | 构建产物收集和便携包打包脚本。 |
+| `release/` | 构建完成后复制安装包和便携包的分发目录。 |
+
+## 功能特性
+
+| 模块 | 能力 |
+|---|---|
+| 置顶弹窗 | 每次复制生成独立桌面弹窗，支持 Pin、Copy、Unpin、自动销毁、拖动和堆叠偏移。 |
+| 后台轻量模式 | 开机自启动时默认静默运行，不弹主窗口；可通过托盘或快捷键恢复界面。 |
+| 单实例运行 | 重复启动不会保留第二个运行进程，而是唤醒并置前已有主窗口。 |
+| 历史记录 | 使用 SQLite 本地存储，支持搜索、类型过滤、单条删除、批量删除和历史直接置顶。 |
+| 收藏保护 | 收藏内容独立显示，同时保留在普通历史记录中；常规清理时默认保留收藏项。 |
+| 隐私过滤 | 支持关闭、轻量、智能三档策略；轻量模式使用本地规则识别常见敏感内容。 |
+| 快捷键 | 支持置顶服务、历史服务、显示/隐藏主界面、轻量模式和暂停监听等全局操作。 |
+| 数据管理 | 支持导入/导出 JSON 或带完整属性的 CSV 历史记录、按天数清理、查看数据库位置，并管理自动轮转的运行日志。 |
+| 外观设置 | 支持深色、浅色、跟随系统、界面缩放、弹窗缩放和动画模式。 |
+| 便携化 | 历史记录、设置、资源、导出文件和日志都保存在 `data/` 目录中。 |
+
+## 快速开始
+
+### 开发运行
+
+```bash
+npm install --registry=https://registry.npmmirror.com
+npm run desktop:dev
+```
+
+Windows 开发环境建议先安装 Rust、Node.js、Microsoft Visual Studio Build Tools 和 WebView2 Runtime。项目根目录包含 `.cargo/config.toml`，Cargo 默认使用 sparse 镜像源，适合网络访问 crates.io 不稳定的环境。
+
+
+### 查看已安装版本
+
+```powershell
+clipanchor.exe --version
+clipanchor.exe -V
+```
+
+macOS 和 Linux 使用安装后的 `clipanchor` 可执行文件并传入相同参数。该命令只输出软件版本并立即退出，不会打开主窗口，也不会启动剪贴板监听服务。
+
+### 构建安装包
+
+```bash
+npm run desktop:build
+```
+
+Tauri 会把安装包输出到 `src-tauri/target/release/bundle/`。项目脚本会把可分发产物复制到根目录 `release/`，便于查找和发布。
+
+Linux 构建目标为 DEB 和 RPM。Windows 构建目标包含 NSIS 安装器和 MSI 安装包。macOS 构建目标包含 APP 和 DMG。
+
+## 使用方法
+
+1. 启动 ClipAnchor，确认“置顶服务”和“历史记录服务”处于开启状态。
+2. 复制文本、图片或文件，桌面会出现紧凑弹窗。
+3. 点击 Pin 后，弹窗保持置顶，并显示 Copy、Unpin 等操作。
+4. 在剪贴板页面中搜索历史记录，点击星标收藏，点击 Pin 图标可从历史记录生成置顶弹窗。
+5. 在设置页面调整主题、语言、缩放、快捷键、弹窗位置、隐私过滤和数据清理策略。
+6. 开启自启动后，下次登录系统时 ClipAnchor 会进入后台轻量模式；双击托盘图标、点击“显示 ClipAnchor”或按 `Ctrl+Shift+X` 可恢复主窗口。
+
+## 数据位置
+
+ClipAnchor 默认把运行数据放在程序同级目录下：
+
+```text
+data/
+├── clipanchor.db
+├── settings.json
+├── resources/
+├── exports/        # JSON 和 CSV 历史导出均包含记录属性。
+└── logs/
+    ├── clipanchor.log
+    └── clipanchor-*.log
+```
+
+日志会在当前文件过大时自动轮转。设置 → 日志管理中提供日志占用、保留天数、打开日志目录、刷新和清理入口，归档日志默认保留 7 天。
+
+复制整个项目或安装目录即可迁移历史记录和设置。删除 `data/` 前请先确认已经备份重要内容。
+
+## 构建产物命名
+
+发布脚本会尽量把安装包整理为以下格式：
+
+```text
+ClipAnchor_Windows_x64.msi
+ClipAnchor_Windows_x64.exe
+ClipAnchor_macOS_arm64.dmg
+ClipAnchor_Linux_x64.deb
+ClipAnchor_Linux_x64.rpm
+```
+
+实际输出取决于当前操作系统、CPU 架构和已安装的 Tauri 打包工具链。
+
+## 许可证
+
+ClipAnchor 使用 Apache License 2.0 许可证。完整许可证正文见根目录 `LICENSE`。
