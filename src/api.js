@@ -50,6 +50,7 @@ export const api = {
   },
   getUpdateStatus: () => invoke('get_update_status'),
   checkUpdate: (source = 'manual') => invoke('check_update', { source }),
+  installDownloadedUpdate: () => invoke('install_downloaded_update'),
   getDataUsage: () => invoke('get_data_usage'),
   getLogStatus: () => invoke('get_log_status'),
   clearLogs: () => invoke('clear_logs'),

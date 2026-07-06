@@ -11,18 +11,20 @@ ClipAnchor is a cross-platform clipboard pinning tool built with Rust, Tauri, an
 
 ## AI development notice
 
-This project was implemented with AI-assisted programming. Before public release or production use, review the code, test the target platforms, verify the watermark behavior with your own sample set, and confirm all third-party binary licenses.
+This project was implemented with AI-assisted programming. Before public release or production use, review the code, test every target platform, verify clipboard capture, popup, history, autostart, installer, and update behavior with your own sample set, and confirm all third-party binary licenses.
 
 ## Current Verification Status
 
 | Platform      | Current Status | Notes |
 | ------------- | -------------- | ----- |
-| Windows x64   | Verified       | -     |
-| Windows ARM64 | Unverified     | -     |
-| macOS ARM64   | Unverified     | -     |
-| macOS x64     | Unverified     | -     |
-| Linux x64     | Unverified     | -     |
-| Linux ARM64   | Unverified     | -     |
+| Windows x64   | Verified       | Current Windows x64 smoke testing covers desktop startup, tray restore, single-instance activation, settings persistence, clipboard capture/history, manual update checking, GitHub Release downgrade-test detection and package download, old update package cleanup before a new check, hidden background update downloader without command-window flashes, and `--version`. A close-to-tray monitor fix and watchdog have been added for long idle sessions. Before public distribution, repeat long-duration background testing, startup Lite-mode update testing, installer signing, localized MSI UI, and release-side asset publishing verification. |
+| Windows ARM64 | Unverified     | Native ARM64 packaging and runtime behavior have not been validated yet. Before release, verify startup, tray, autostart, global shortcuts, clipboard access, and update asset matching on real Windows ARM64 hardware. |
+| macOS ARM64   | Unverified     | Build and runtime verification on Apple Silicon are still pending. Before release, validate the APP/DMG bundle, code signing/notarization, clipboard permissions, tray/menu behavior, autostart plist, and update handoff. |
+| macOS x64     | Unverified     | Intel macOS packaging and runtime verification are still pending. Before release, validate the same APP/DMG, signing/notarization, permissions, tray/menu, autostart, and update flow on Intel hardware or a reliable Intel environment. |
+| Linux x64     | Unverified     | DEB/RPM installation and runtime behavior have not been validated across desktop environments. Before release, test desktop entry creation, tray support, autostart, global shortcuts, X11/Wayland clipboard behavior, and DEB/RPM update selection. |
+| Linux ARM64   | Unverified     | Native ARM64 Linux packaging and runtime behavior are still pending. Before release, test DEB/RPM packaging, desktop integration, tray availability, clipboard access, and update asset matching on real ARM64 hardware. |
+
+The status above is a practical packaging and runtime checklist, not a security audit or long-term stability guarantee. **Verified** means the listed platform has passed the current smoke-test scope; **Unverified** means the code is intended to support the platform but still needs a real-device packaging and runtime pass before release. Long-duration background monitoring and release installer handoff should be re-tested after every update to clipboard polling, Lite mode, autostart, installer packaging, signing, or the GitHub Release pipeline.
 
 ClipAnchor is designed to stay portable and quiet. Runtime data is stored beside the application under `data/`, which makes backup and migration straightforward. When launched at system startup, ClipAnchor enters Lite mode by default: no main window is shown, while the tray icon, clipboard monitor, and database service keep running silently.
 
@@ -111,6 +113,12 @@ data/
 Logs rotate automatically when the current file grows too large. Settings → Log management includes log size, configurable retention days, log folder access, refresh, and cleanup controls.
 
 Move the whole project or installation folder to migrate history and settings together. Back up important data before deleting `data/`.
+
+## Update channel
+
+ClipAnchor checks GitHub Releases in the background at startup and keeps the process silent while the main window is closed. The manual **Check update** button opens an in-app status card immediately, then shows checking, downloading, ready-to-install, no-update, incompatible-asset, or failure states. Release tags should use `pre-release-v...` or `release-v...`.
+
+Asset selection is automatic: Windows prefers `ClipAnchor_Windows_x64.exe`; if no EXE exists, it chooses a localized MSI such as `ClipAnchor_Windows_x64_zh-CN.msi` or `ClipAnchor_Windows_x64_en-US.msi`. macOS uses DMG, while Linux selects DEB or RPM according to the distribution family. Before each new check, old packages in `data/updates/` are removed so stale installers cannot be reused accidentally. Newly downloaded packages are stored in `data/updates/` and opened through the system installer when the user chooses **Install now**. A normal manual launch checks in the background and opens the update card if a new version is found; startup Lite mode keeps the check and download silent until the user opens the main window.
 
 ## Release artifact names
 

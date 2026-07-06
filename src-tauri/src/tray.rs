@@ -9,6 +9,9 @@ pub fn install_tray(app: &AppHandle) -> tauri::Result<()> {
     let mut builder = TrayIconBuilder::with_id("clipanchor-tray")
         .tooltip("ClipAnchor")
         .menu(&menu)
+        // Windows 用户通常期望左键打开主界面、右键打开菜单，因此这里关闭左键弹菜单以避免和唤醒窗口的行为冲突。
+        // Windows users usually expect left click to open the app and right click to open the menu, so this disables left-click menus to avoid conflicting with window wake-up.
+        .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => {
                 if let Some(state) = app.try_state::<crate::models::AppState>() { app_log::info(&state.paths, "tray", "show menu clicked"); }

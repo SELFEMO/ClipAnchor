@@ -2,7 +2,7 @@ use crate::{app_log, database, models::{AppState, AppSettings, ClipItem, ClipKin
 use arboard::{Clipboard, ImageData};
 use chrono::Utc;
 use image::{ImageBuffer, Rgba};
-use std::{borrow::Cow, fs, io::Cursor, mem, path::Path, ptr, sync::{atomic::{AtomicBool, Ordering}, Arc}, thread, time::Duration};
+use std::{borrow::Cow, fs, io::Cursor, mem, panic::{catch_unwind, AssertUnwindSafe}, path::Path, ptr, sync::{atomic::{AtomicBool, Ordering}, Arc}, thread, time::{Duration, SystemTime, UNIX_EPOCH}};
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
@@ -37,6 +37,10 @@ const CF_TEXT: u32 = 1;
 // OEM text is one of Windows clipboard compatibility formats, so it is kept as a final fallback for rare non-Unicode sources.
 const CF_OEMTEXT: u32 = 7;
 
+const MONITOR_POLL_MS: u64 = 650;
+const MONITOR_WATCHDOG_MS: u64 = 30_000;
+const MONITOR_STALE_SECONDS: i64 = 90;
+
 pub fn ensure_monitor(app: AppHandle, state: AppState) -> Result<(), String> {
     let mut guard = state.monitor_stop.lock().map_err(|error| error.to_string())?;
     if guard.is_some() {
@@ -46,18 +50,75 @@ pub fn ensure_monitor(app: AppHandle, state: AppState) -> Result<(), String> {
     *guard = Some(stop.clone());
     drop(guard);
 
+    state.monitor_heartbeat.store(unix_now(), Ordering::Relaxed);
     app_log::info(&state.paths, "clipboard", "clipboard monitor started");
     thread::spawn(move || {
         let mut last_signature = initial_signature(&state).unwrap_or_default();
         while !stop.load(Ordering::Relaxed) {
-            if let Err(error) = poll_once(&app, &state, &mut last_signature) {
-                app_log::warn(&state.paths, "clipboard", format!("poll skipped: {}", error));
-                let _ = app.emit("clipanchor-log", error);
+            state.monitor_heartbeat.store(unix_now(), Ordering::Relaxed);
+            // 剪贴板来源不可控，轮询体必须捕获 panic，避免某次系统剪贴板异常导致后台服务永久退出。
+            // Clipboard providers are outside our control, so the polling body catches panics to keep one OS clipboard failure from permanently killing the background service.
+            match catch_unwind(AssertUnwindSafe(|| poll_once(&app, &state, &mut last_signature))) {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    app_log::warn(&state.paths, "clipboard", format!("poll skipped: {}", error));
+                    let _ = app.emit("clipanchor-log", error);
+                }
+                Err(_) => {
+                    app_log::error(&state.paths, "clipboard", "clipboard poll panicked and was recovered");
+                }
             }
-            thread::sleep(Duration::from_millis(650));
+            thread::sleep(Duration::from_millis(MONITOR_POLL_MS));
         }
+        app_log::info(&state.paths, "clipboard", "clipboard monitor thread stopped");
     });
     Ok(())
+}
+
+pub fn start_monitor_watchdog(app: AppHandle, state: AppState) {
+    thread::spawn(move || loop {
+        thread::sleep(Duration::from_millis(MONITOR_WATCHDOG_MS));
+        let should_monitor = state
+            .settings
+            .lock()
+            .map(|settings| settings.pin_service_enabled || settings.history_service_enabled)
+            .unwrap_or(true);
+        if !should_monitor {
+            continue;
+        }
+        let last_tick = state.monitor_heartbeat.load(Ordering::Relaxed);
+        if last_tick <= 0 {
+            continue;
+        }
+        let elapsed = unix_now().saturating_sub(last_tick);
+        if elapsed <= MONITOR_STALE_SECONDS {
+            continue;
+        }
+
+        app_log::warn(&state.paths, "clipboard", format!("clipboard monitor heartbeat stale for {} seconds; restarting monitor", elapsed));
+        force_restart_monitor(&app, &state);
+    });
+}
+
+fn force_restart_monitor(app: &AppHandle, state: &AppState) {
+    // 看门狗先撤销旧停止句柄再启动新线程，是为了修复长时间后台后轮询线程死亡但状态仍显示运行的问题。
+    // The watchdog clears the old stop handle before starting a new thread to recover cases where the poll thread died while the service still looks enabled.
+    if let Ok(mut guard) = state.monitor_stop.lock() {
+        if let Some(stop) = guard.take() {
+            stop.store(true, Ordering::Relaxed);
+        }
+    }
+    thread::sleep(Duration::from_millis(200));
+    if let Err(error) = ensure_monitor(app.clone(), state.clone()) {
+        app_log::error(&state.paths, "clipboard", format!("clipboard monitor restart failed: {}", error));
+    }
+}
+
+fn unix_now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 

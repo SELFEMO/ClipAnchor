@@ -160,8 +160,20 @@
     .stack { display: grid; gap: 14px; }
     .callout { border-radius: 24px; padding: 20px; background: color-mix(in srgb, var(--card-strong), transparent 10%); border: 1px solid var(--line); }
     .callout strong { display: block; margin-bottom: 7px; font-size: 17px; }
-    .download-panel { display: grid; grid-template-columns: 1fr auto; gap: 22px; align-items: center; border-radius: var(--radius-lg); padding: 30px; }
-    .artifact-list { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+    .download-panel { display: grid; grid-template-columns: 1fr; gap: 18px; border-radius: var(--radius-lg); padding: 30px; overflow: hidden; }
+    .download-head { max-width: 920px; min-width: 0; }
+    .download-body { display: grid; grid-template-columns: minmax(0, 1fr) 210px; gap: 18px; align-items: stretch; }
+    .artifact-list { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 0; min-width: 0; }
+    .download-side { display: flex; flex-direction: column; gap: 12px; align-items: stretch; align-self: stretch; min-width: 0; }
+    .download-side .btn { width: 100%; min-height: 48px; }
+    .download-status { display: inline-flex; align-items: center; gap: 9px; margin-top: 18px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 999px; background: color-mix(in srgb, var(--card-strong), transparent 8%); color: var(--muted); font-size: 13px; font-weight: 850; }
+    .status-dot { width: 9px; height: 9px; border-radius: 999px; background: var(--blue); box-shadow: 0 0 0 5px rgba(49,159,255,.13); }
+    .download-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center; min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: 24px; background: color-mix(in srgb, var(--card-strong), transparent 10%); }
+    .download-card strong { display: block; margin: 4px 0 5px; font-size: 18px; letter-spacing: -.026em; overflow-wrap: anywhere; }
+    .download-card .meta-label { color: var(--subtle); font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: .12em; }
+    .download-card .muted { margin: 0; font-size: 13px; }
+    .download-option { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 8px 12px; color: var(--muted); font-size: 12px; font-weight: 850; max-width: 100%; }
+    .download-option span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     details { border-radius: 21px; padding: 18px 20px; margin: 10px 0; }
     summary { cursor: pointer; font-weight: 900; font-size: 15px; }
     footer { padding: 34px 24px 58px; text-align: center; color: var(--muted); font-size: 14px; }
@@ -170,7 +182,12 @@
     @keyframes float { 50% { transform: translateY(-16px); } }
     @media (max-width: 980px) {
       .nav-link { display: none; }
-      .hero, .split-panel, .download-panel { grid-template-columns: 1fr; }
+      .hero, .split-panel { grid-template-columns: 1fr; }
+      .download-body { grid-template-columns: 1fr; }
+      .download-side { flex-direction: row; flex-wrap: wrap; }
+      .download-side .btn { flex: 1 1 180px; }
+      .download-card { grid-template-columns: 1fr; }
+      .download-card .btn { width: 100%; }
       .product-stage { width: min(620px, 100%); margin: 8px auto 0; min-height: 470px; }
       .app-window { inset: 28px 16px auto 16px; height: 382px; transform: none; }
       .popup-card { width: min(330px, 74%); right: 18px; top: 96px; }
@@ -299,17 +316,34 @@
 
     <section id="download" class="wrap section">
       <div class="download-panel glass">
-        <div>
-          <h2 data-i18n="downloadTitle">Download from the software repository.</h2>
-          <p class="muted" data-i18n="downloadBody">Release packages are distributed through the official software repository. Automatic update service is not open yet, so please download new installers or portable packages manually when a new release is published.</p>
-          <div class="artifact-list">
-            <span class="pill">Windows · MSI / EXE</span>
-            <span class="pill">macOS · APP / DMG</span>
-            <span class="pill">Linux · DEB / RPM</span>
-            <span class="pill" data-i18n="cliVersion">CLI: --version / -V</span>
+        <div class="download-head">
+          <h2 data-i18n="downloadTitle">Download the right package automatically.</h2>
+          <p class="muted" data-i18n="downloadBody">The page detects your desktop platform and selects the most suitable package from the official GitHub Releases. You can still choose another installer from the release list below.</p>
+          <div class="download-status" role="status" aria-live="polite">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span id="downloadStatusText" data-i18n="downloadStatusLoading">Finding the latest package…</span>
           </div>
         </div>
-        <a class="btn primary" href="#download" data-i18n="downloadCta">Download</a>
+        <div class="download-body">
+          <div class="download-card">
+            <div>
+              <span class="meta-label" data-i18n="recommendedLabel">Recommended download</span>
+              <strong id="recommendedTitle" data-i18n="recommendedPending">Preparing download options</strong>
+              <p id="recommendedMeta" class="muted" data-i18n="recommendedMetaPending">Release information will appear here automatically.</p>
+            </div>
+            <a id="primaryDownloadButton" class="btn primary" href="https://github.com/SELFEMO/ClipAnchor/releases" target="_blank" rel="noopener noreferrer" data-i18n="downloadOpenReleases">Open releases</a>
+          </div>
+          <div class="download-side">
+            <a id="allDownloadsButton" class="btn ghost" href="https://github.com/SELFEMO/ClipAnchor/releases" target="_blank" rel="noopener noreferrer" data-i18n="allDownloads">All downloads</a>
+            <a class="btn ghost" href="https://github.com/SELFEMO/ClipAnchor" target="_blank" rel="noopener noreferrer" data-i18n="sourceCode">Source code</a>
+          </div>
+        </div>
+        <div id="downloadArtifactList" class="artifact-list" aria-label="Available download packages">
+          <span class="pill">Windows · EXE / MSI</span>
+          <span class="pill">macOS · DMG</span>
+          <span class="pill">Linux · DEB / RPM</span>
+          <span class="pill" data-i18n="cliVersion">CLI: --version / -V</span>
+        </div>
       </div>
     </section>
 
@@ -346,7 +380,11 @@
         p1Title: 'Sensitive content filter', p1Body: 'Light mode uses local rules to avoid storing likely passwords, keys, IDs, tokens, and similar text.',
         p2Title: 'Rotated runtime logs', p2Body: 'Logs record service, tray, popup, shortcut, data, and error events. Clipboard body text is not written to logs.',
         p3Title: 'One running instance', p3Body: 'Starting ClipAnchor again activates the existing main window instead of leaving another long-running process.',
-        downloadTitle: 'Download from the software repository.', downloadBody: 'Release packages are distributed through the official software repository. Automatic update service is not open yet, so please download new installers or portable packages manually when a new release is published.',
+        downloadTitle: 'Download the right package automatically.', downloadBody: 'The page detects your desktop platform and selects the most suitable package from the official GitHub Releases. You can still choose another installer from the release list below.',
+        downloadStatusLoading: 'Finding the latest package…', downloadStatusReady: 'Recommended package is ready', downloadStatusFallback: 'Open GitHub Releases to choose a package',
+        recommendedLabel: 'Recommended download', recommendedPending: 'Preparing download options', recommendedMetaPending: 'Release information will appear here automatically.',
+        downloadRecommended: 'Download package', downloadOpenReleases: 'Open releases', allDownloads: 'All downloads', sourceCode: 'Source code',
+        noCompatiblePackage: 'No matching package was found for this device.', latestReleaseLabel: 'Latest release', platformLabel: 'Detected platform',
         downloadCta: 'Download', cliVersion: 'CLI: --version / -V', faqTitle: 'FAQ',
         q1: 'Where is my data stored?', a1: 'All runtime data is stored under the app-local data folder, including clipanchor.db, settings, resources, exports, and logs.',
         q2: 'What happens at system startup?', a2: 'ClipAnchor starts in Lite mode by default. The main window stays hidden while tray, monitoring, and storage services keep running.',
@@ -376,7 +414,11 @@
         p1Title: '敏感内容过滤', p1Body: '轻量模式会用本地规则避免保存疑似密码、密钥、证件号、令牌等文本。',
         p2Title: '轮转运行日志', p2Body: '日志记录服务、托盘、弹窗、快捷键、数据和错误事件，不写入剪贴板正文。',
         p3Title: '单实例运行', p3Body: '再次启动 ClipAnchor 会激活已有主窗口，不会留下第二个长期运行进程。',
-        downloadTitle: '从软件下载仓库获取。', downloadBody: '发布包通过官方软件下载仓库分发。自动更新服务暂未开放，请在新版本发布后手动下载新版安装包或便携包。',
+        downloadTitle: '自动选择适合你的安装包。', downloadBody: '网页会识别当前桌面平台，并从官方 GitHub Releases 中选择最合适的安装包。你也可以在下方列表中手动选择其他安装包。',
+        downloadStatusLoading: '正在查找最新安装包…', downloadStatusReady: '推荐安装包已准备好', downloadStatusFallback: '请打开 GitHub Releases 选择安装包',
+        recommendedLabel: '推荐下载', recommendedPending: '正在准备下载选项', recommendedMetaPending: '发布信息会自动显示在这里。',
+        downloadRecommended: '下载安装包', downloadOpenReleases: '打开发布页', allDownloads: '全部下载', sourceCode: '源代码',
+        noCompatiblePackage: '未找到适合当前设备的安装包。', latestReleaseLabel: '最新版本', platformLabel: '识别平台',
         downloadCta: '下载', cliVersion: '命令行：--version / -V', faqTitle: '常见问题',
         q1: '我的数据存在哪里？', a1: '所有运行数据都保存在软件同级 data 文件夹，包括 clipanchor.db、设置、资源、导出文件和日志。',
         q2: '开机自启动时会发生什么？', a2: 'ClipAnchor 默认进入轻量模式。主窗口保持隐藏，托盘、监听和存储服务继续在后台运行。',
@@ -423,7 +465,180 @@
       document.getElementById('themeButton').title = isDark ? dict.lightMode : dict.darkMode;
     }
 
-    document.getElementById('langButton').addEventListener('click', () => applyLanguage(currentLang === 'zh' ? 'en' : 'zh'));
+    const releaseApiUrl = 'https://api.github.com/repos/SELFEMO/ClipAnchor/releases';
+    const releasesPageUrl = 'https://github.com/SELFEMO/ClipAnchor/releases';
+
+    function releaseVersionParts(tagName) {
+      const match = String(tagName || '').match(/(?:pre-release|release)-v(\d+(?:\.\d+){0,3})/i);
+      return match ? match[1].split('.').map((part) => Number(part) || 0) : [0];
+    }
+
+    function compareVersions(left, right) {
+      const maxLength = Math.max(left.length, right.length);
+      for (let index = 0; index < maxLength; index += 1) {
+        const diff = (left[index] || 0) - (right[index] || 0);
+        if (diff !== 0) return diff;
+      }
+      return 0;
+    }
+
+    function pickDisplayRelease(releases) {
+      const candidates = releases.filter((release) => !release.draft && /(?:pre-release|release)-v/i.test(release.tag_name || ''));
+      const stable = candidates.filter((release) => /^release-v/i.test(release.tag_name || ''));
+      const pool = stable.length ? stable : candidates;
+      return pool.sort((left, right) => {
+        const versionDiff = compareVersions(releaseVersionParts(right.tag_name), releaseVersionParts(left.tag_name));
+        if (versionDiff !== 0) return versionDiff;
+        return new Date(right.published_at || right.created_at || 0) - new Date(left.published_at || left.created_at || 0);
+      })[0] || releases.find((release) => !release.draft);
+    }
+
+    async function getPlatformInfo() {
+      const userAgent = navigator.userAgent || '';
+      const platformText = `${navigator.userAgentData?.platform || ''} ${navigator.platform || ''} ${userAgent}`.toLowerCase();
+      let os = 'unknown';
+      if (/windows|win32|win64/.test(platformText)) os = 'windows';
+      else if (/macintosh|mac os|darwin/.test(platformText)) os = 'macos';
+      else if (/linux|x11/.test(platformText)) os = 'linux';
+
+      let architecture = /arm64|aarch64/.test(platformText) ? 'arm64' : 'x64';
+      if (navigator.userAgentData?.getHighEntropyValues) {
+        try {
+          const highEntropy = await navigator.userAgentData.getHighEntropyValues(['architecture', 'bitness']);
+          const rawArch = `${highEntropy.architecture || ''} ${highEntropy.bitness || ''}`.toLowerCase();
+          if (/arm/.test(rawArch)) architecture = 'arm64';
+          else if (/64|x86/.test(rawArch)) architecture = 'x64';
+        } catch (_) {
+          // 高精度平台信息并非所有浏览器都提供，保持基础识别结果可以避免下载入口失效。
+          // Some browsers do not expose high-entropy platform data, so the basic detection keeps downloads usable.
+        }
+      }
+      return { os, architecture, language: currentLang === 'zh' ? 'zh-CN' : 'en-US' };
+    }
+
+    function assetMatchesArchitecture(name, architecture) {
+      const lower = name.toLowerCase();
+      if (architecture === 'arm64') return /arm64|aarch64/.test(lower);
+      return !/arm64|aarch64/.test(lower) && (/x64|x86_64|amd64|windows|macos|linux/.test(lower));
+    }
+
+    function rankAsset(asset, platform) {
+      const name = asset.name || '';
+      const lower = name.toLowerCase();
+      if (!assetMatchesArchitecture(name, platform.architecture)) return -1;
+      let score = 0;
+      if (platform.os === 'windows') {
+        if (!/windows|win/.test(lower)) return -1;
+        if (lower.endsWith('.exe')) score += 120;
+        else if (lower.endsWith('.msi')) score += 95;
+        else if (lower.endsWith('.zip')) score += 42;
+        else return -1;
+        if (platform.language === 'zh-CN' && /zh-cn|zh_cn|cn/.test(lower)) score += 8;
+        if (platform.language === 'en-US' && /en-us|en_us|english|en/.test(lower)) score += 8;
+      } else if (platform.os === 'macos') {
+        if (!/macos|darwin|apple|osx/.test(lower)) return -1;
+        if (lower.endsWith('.dmg')) score += 120;
+        else if (lower.endsWith('.pkg')) score += 85;
+        else if (lower.endsWith('.zip')) score += 52;
+        else return -1;
+      } else if (platform.os === 'linux') {
+        if (!/linux/.test(lower)) return -1;
+        if (lower.endsWith('.deb')) score += 112;
+        else if (lower.endsWith('.rpm')) score += 104;
+        else if (lower.endsWith('.tar.gz') || lower.endsWith('.tgz')) score += 44;
+        else return -1;
+      } else if (/\.(exe|msi|dmg|deb|rpm|zip)$/i.test(name)) {
+        score += 10;
+      } else {
+        return -1;
+      }
+      return score;
+    }
+
+    function selectRecommendedAsset(assets, platform) {
+      return assets
+        .map((asset) => ({ asset, score: rankAsset(asset, platform) }))
+        .filter((entry) => entry.score >= 0)
+        .sort((left, right) => right.score - left.score)[0]?.asset || null;
+    }
+
+    function formatPlatform(platform) {
+      const osNames = { windows: 'Windows', macos: 'macOS', linux: 'Linux', unknown: currentLang === 'zh' ? '当前设备' : 'this device' };
+      return `${osNames[platform.os] || osNames.unknown} ${platform.architecture}`;
+    }
+
+    function updateDownloadStatus(key) {
+      const dict = translations[currentLang];
+      const statusText = document.getElementById('downloadStatusText');
+      if (statusText) statusText.textContent = dict[key] || dict.downloadStatusFallback;
+    }
+
+    function renderDownloadPanel(release, platform, recommendedAsset) {
+      const dict = translations[currentLang];
+      const title = document.getElementById('recommendedTitle');
+      const meta = document.getElementById('recommendedMeta');
+      const primary = document.getElementById('primaryDownloadButton');
+      const list = document.getElementById('downloadArtifactList');
+      const releaseUrl = release?.html_url || releasesPageUrl;
+      document.getElementById('allDownloadsButton').href = releaseUrl;
+
+      if (recommendedAsset) {
+        title.textContent = recommendedAsset.name;
+        meta.textContent = `${dict.latestReleaseLabel}: ${release.name || release.tag_name} · ${dict.platformLabel}: ${formatPlatform(platform)}`;
+        primary.href = recommendedAsset.browser_download_url;
+        primary.textContent = dict.downloadRecommended;
+        updateDownloadStatus('downloadStatusReady');
+      } else {
+        title.textContent = dict.noCompatiblePackage;
+        meta.textContent = `${dict.latestReleaseLabel}: ${release?.name || release?.tag_name || 'GitHub Releases'} · ${dict.platformLabel}: ${formatPlatform(platform)}`;
+        primary.href = releaseUrl;
+        primary.textContent = dict.downloadOpenReleases;
+        updateDownloadStatus('downloadStatusFallback');
+      }
+
+      const assets = (release?.assets || []).filter((asset) => /\.(exe|msi|dmg|deb|rpm|zip|tar\.gz|tgz)$/i.test(asset.name || ''));
+      list.innerHTML = '';
+      assets.slice(0, 8).forEach((asset) => {
+        const link = document.createElement('a');
+        link.className = 'download-option';
+        link.href = asset.browser_download_url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        const label = document.createElement('span');
+        label.textContent = asset.name;
+        link.appendChild(label);
+        list.appendChild(link);
+      });
+      if (!assets.length) {
+        ['Windows · EXE / MSI', 'macOS · DMG', 'Linux · DEB / RPM', dict.cliVersion].forEach((item) => {
+          const pill = document.createElement('span');
+          pill.className = 'pill';
+          pill.textContent = item;
+          list.appendChild(pill);
+        });
+      }
+    }
+
+    async function initializeDownloadPanel() {
+      const platform = await getPlatformInfo();
+      try {
+        const response = await fetch(releaseApiUrl, { headers: { Accept: 'application/vnd.github+json' } });
+        if (!response.ok) throw new Error('Release request failed');
+        const releases = await response.json();
+        const release = pickDisplayRelease(Array.isArray(releases) ? releases : []);
+        const recommendedAsset = release ? selectRecommendedAsset(release.assets || [], platform) : null;
+        renderDownloadPanel(release, platform, recommendedAsset);
+      } catch (_) {
+        // 官网是静态页面，网络或 API 限流失败时保留发布页入口，避免用户被卡在无下载状态。
+        // The website is static, so release-page fallback prevents users from being blocked by network or API limits.
+        renderDownloadPanel(null, platform, null);
+      }
+    }
+
+    document.getElementById('langButton').addEventListener('click', () => {
+      applyLanguage(currentLang === 'zh' ? 'en' : 'zh');
+      initializeDownloadPanel();
+    });
     document.getElementById('themeButton').addEventListener('click', () => applyTheme(!document.documentElement.classList.contains('dark')));
     prefersDark.addEventListener('change', (event) => {
       if (!localStorage.getItem(themeStoreKey)) applyTheme(event.matches, false);
@@ -431,6 +646,7 @@
 
     applyTheme(localStorage.getItem(themeStoreKey) ? localStorage.getItem(themeStoreKey) === 'dark' : prefersDark.matches, false);
     applyLanguage(currentLang, false);
+    initializeDownloadPanel();
   </script>
 </body>
 </html>

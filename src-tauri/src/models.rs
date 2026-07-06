@@ -1,6 +1,6 @@
 use crate::{paths, settings};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, sync::{Arc, Mutex}};
+use std::{collections::HashMap, sync::{atomic::{AtomicBool, AtomicI64}, Arc, Mutex}};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -133,6 +133,18 @@ pub struct UpdateStatusPayload {
     pub attention_required: bool,
     pub checked_at: String,
     pub source: String,
+    pub current_version: Option<String>,
+    pub latest_version: Option<String>,
+    pub release_tag: Option<String>,
+    pub release_name: Option<String>,
+    pub release_notes: Option<String>,
+    pub asset_name: Option<String>,
+    pub asset_url: Option<String>,
+    pub downloaded_path: Option<String>,
+    pub total_bytes: Option<u64>,
+    pub downloaded_bytes: Option<u64>,
+    pub install_ready: bool,
+    pub message: Option<String>,
 }
 
 impl Default for UpdateStatusPayload {
@@ -146,6 +158,18 @@ impl Default for UpdateStatusPayload {
             attention_required: false,
             checked_at: String::new(),
             source: "unknown".into(),
+            current_version: None,
+            latest_version: None,
+            release_tag: None,
+            release_name: None,
+            release_notes: None,
+            asset_name: None,
+            asset_url: None,
+            downloaded_path: None,
+            total_bytes: None,
+            downloaded_bytes: None,
+            install_ready: false,
+            message: None,
         }
     }
 }
@@ -169,7 +193,8 @@ pub struct AppState {
     pub paths: paths::DataPaths,
     pub settings: Arc<Mutex<AppSettings>>,
     pub temp_items: Arc<Mutex<HashMap<String, ClipItem>>>,
-    pub monitor_stop: Arc<Mutex<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>>>,
+    pub monitor_stop: Arc<Mutex<Option<Arc<AtomicBool>>>>,
+    pub monitor_heartbeat: Arc<AtomicI64>,
 }
 
 impl AppState {
@@ -182,6 +207,7 @@ impl AppState {
             settings: Arc::new(Mutex::new(loaded)),
             temp_items: Arc::new(Mutex::new(HashMap::new())),
             monitor_stop: Arc::new(Mutex::new(None)),
+            monitor_heartbeat: Arc::new(AtomicI64::new(0)),
         })
     }
 }

@@ -44,12 +44,12 @@ pub fn toggle_maximize_window(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn close_main_window(app: AppHandle) -> Result<(), String> {
-    // 关闭主窗口仍由后端执行，是为了让自绘标题栏的关闭按钮与 Tauri 的生命周期处理保持一致。
-    // Closing is also routed through the backend so the custom titlebar stays aligned with Tauri lifecycle handling.
-    app.get_webview_window("main")
-        .ok_or_else(|| "Main window not found".to_string())?
-        .close()
-        .map_err(|error| error.to_string())
+    if let Some(state) = app.try_state::<AppState>() {
+        app_log::info(&state.paths, "window", "main window close button requested Lite mode hide");
+    }
+    // 关闭按钮只隐藏主界面而不销毁 WebView，是为了保证长时间轻量模式后仍能从托盘或快捷键稳定唤醒同一个主界面。
+    // The close button only hides the main UI instead of destroying the WebView so tray and shortcut wake-ups remain reliable after long Lite-mode sessions.
+    crate::window_control::hide_main_window(&app)
 }
 
 #[tauri::command]
@@ -987,14 +987,21 @@ pub fn get_update_status(state: State<'_, AppState>) -> Result<UpdateStatusPaylo
 }
 
 #[tauri::command]
-pub fn check_update(state: State<'_, AppState>, source: Option<String>) -> Result<UpdateStatusPayload, String> {
-    // 当前没有正式更新服务，因此手动检查只返回软件内提示，避免出现系统原生弹窗。
-    // There is no live update service yet, so manual checks return an in-app notice instead of a native system dialog.
+pub fn check_update(app: AppHandle, state: State<'_, AppState>, source: Option<String>) -> Result<UpdateStatusPayload, String> {
+    // 手动检查立即进入统一更新状态流，是为了让前端先显示“正在检查”页面，再等待 GitHub Release 结果返回。
+    // Manual checks use the unified update state flow so the UI can show a checking page immediately before GitHub Release results arrive.
     let requested_source = source.unwrap_or_else(|| "manual".into());
     if requested_source == "startup_background" {
-        return Ok(update_service::startup_background_check(&state.paths, false));
+        return Ok(update_service::startup_background_check(&app, &state.paths, false));
     }
-    Ok(update_service::manual_placeholder_check(&state.paths))
+    Ok(update_service::manual_check(&state.paths, &requested_source))
+}
+
+#[tauri::command]
+pub fn install_downloaded_update(state: State<'_, AppState>) -> Result<UpdateStatusPayload, String> {
+    // 安装入口复用后端下载状态，是为了确保“立即更新”只打开已经为当前系统选中的安装包或对应下载地址。
+    // The install entry reuses backend download state so Install Now opens only the package or URL selected for the current system.
+    update_service::install_downloaded_update(&state.paths)
 }
 
 fn validate_shortcuts(settings_value: &AppSettings) -> Result<(), String> {

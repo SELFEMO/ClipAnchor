@@ -14,7 +14,7 @@ mod window_control;
 
 use commands::*;
 use models::AppState;
-use tauri::{Manager, RunEvent};
+use tauri::{Manager, RunEvent, WindowEvent};
 use std::panic;
 
 fn log_startup_issue(state: &AppState, message: &str) {
@@ -96,6 +96,7 @@ pub fn run() {
             open_log_folder,
             get_update_status,
             check_update,
+            install_downloaded_update,
             minimize_window,
             toggle_maximize_window,
             close_main_window,
@@ -121,6 +122,9 @@ pub fn run() {
             } else {
                 log_startup_issue(&state, "Clipboard monitor initialized");
             }
+            // 后台看门狗独立于主窗口运行，是为了在 Windows 长时间隐藏到托盘后自动恢复剪贴板监听线程。
+            // The background watchdog runs independently from the main window so Windows tray-idle sessions can recover the clipboard monitor automatically.
+            clipboard_service::start_monitor_watchdog(handle.clone(), state.clone());
             match state.settings.lock() {
                 Ok(settings) => {
                     if let Err(error) = shortcut::sync_shortcuts(&handle, &settings.shortcuts) {
@@ -132,7 +136,7 @@ pub fn run() {
                 Err(error) => log_startup_issue(&state, &format!("Settings lock unavailable during startup: {}", error)),
             }
             let lite_startup = window_control::should_start_in_lite_mode();
-            let _ = update_service::startup_background_check(&state.paths, lite_startup);
+            let _ = update_service::startup_background_check(&handle, &state.paths, lite_startup);
             if lite_startup {
                 // 自启动参数会保持主窗口隐藏，只留下托盘和后台监听，避免开机时打断用户桌面恢复流程。
                 // The startup flag keeps the main window hidden, leaving only tray and background monitoring so sign-in is not interrupted.
@@ -157,16 +161,27 @@ pub fn run() {
     app.run(|app_handle, event| {
         match event {
             RunEvent::ExitRequested { api, code, .. } => {
-                if let Some(state) = app_handle.try_state::<AppState>() {
-                    log_startup_issue(state.inner(), &format!("Exit requested with code {:?}", code));
-                    clipboard_service::stop_monitor(state.inner());
-                }
                 if code.is_none() {
-                    // 主窗口关闭只隐藏到托盘，是为了避免 WebView2 偶发的窗口销毁错误让 dev 进程直接退出。
-                    // Closing the main window hides it to the tray so transient WebView2 destroy errors do not terminate the dev process.
+                    if let Some(state) = app_handle.try_state::<AppState>() {
+                        log_startup_issue(state.inner(), "Main window close requested; keeping background services alive");
+                    }
+                    // 主窗口关闭只隐藏到托盘且不停止监听，是为了避免用户无操作或关闭窗口后后台服务被误杀。
+                    // Closing the main window only hides it to tray and keeps monitoring alive so idle or close-to-tray sessions do not kill background services.
                     api.prevent_exit();
                     let _ = window_control::hide_main_window(app_handle);
+                } else if let Some(state) = app_handle.try_state::<AppState>() {
+                    log_startup_issue(state.inner(), &format!("Application exit requested with code {:?}", code));
+                    clipboard_service::stop_monitor(state.inner());
                 }
+            }
+            RunEvent::WindowEvent { label, event: WindowEvent::CloseRequested { api, .. }, .. } if label == "main" => {
+                if let Some(state) = app_handle.try_state::<AppState>() {
+                    log_startup_issue(state.inner(), "Main window close event intercepted; hiding instead of destroying WebView");
+                }
+                // 拦截系统关闭事件并隐藏窗口，是为了避免主窗口 WebView 被销毁后，托盘和快捷键只能保留后台服务却无法重新唤起界面。
+                // Intercepting the native close event and hiding the window prevents the main WebView from being destroyed while background services continue running.
+                api.prevent_close();
+                let _ = window_control::hide_main_window(app_handle);
             }
             RunEvent::WindowEvent { .. } => {}
             _ => {}
