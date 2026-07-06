@@ -9,6 +9,20 @@
 
 ClipAnchor is a cross-platform clipboard pinning tool built with Rust, Tauri, and React. It monitors copied text, images, and files in the background, turns them into compact desktop popups, and saves non-sensitive content into local history. Important items can be favorited, pinned again, copied back to the clipboard, searched, and managed from the history list.
 
+## AI development notice
+
+This project was implemented with AI-assisted programming. Before public release or production use, review the code, test the target platforms, verify the watermark behavior with your own sample set, and confirm all third-party binary licenses.
+
+## Current Verification Status
+
+| Platform      | Current Status | Notes |
+| ------------- | -------------- | ----- |
+| Windows x64   | Verified       | -     |
+| Windows ARM64 | Unverified     | -     |
+| macOS ARM64   | Unverified     | -     |
+| macOS x64     | Unverified     | -     |
+| Linux x64     | Unverified     | -     |
+| Linux ARM64   | Unverified     | -     |
 
 ClipAnchor is designed to stay portable and quiet. Runtime data is stored beside the application under `data/`, which makes backup and migration straightforward. When launched at system startup, ClipAnchor enters Lite mode by default: no main window is shown, while the tray icon, clipboard monitor, and database service keep running silently.
 
