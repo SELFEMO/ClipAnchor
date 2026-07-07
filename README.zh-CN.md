@@ -146,8 +146,3 @@ ClipAnchor_Linux_x64.rpm
 ## 许可证
 
 ClipAnchor 使用 Apache License 2.0 许可证。完整许可证正文见根目录 `LICENSE`。
-
-## Windows 构建说明
-
-项目不会在 `.cargo/config.toml` 中强制绑定某个 Rust 镜像源。这样做是为了避免单个镜像站 DNS 或服务异常时阻塞 Windows、macOS、Linux 构建。需要使用镜像时，请在本机 Cargo 全局配置中设置，或临时设置环境变量。
-
