@@ -6,11 +6,12 @@
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "tauri": "tauri",
-    "desktop:dev": "npm run tauri -- dev --features macos-private-api",
-    "desktop:build": "npm run tauri -- build --features macos-private-api && node scripts/collect-release.mjs",
-    "desktop:build:macos-arm64": "npm run tauri -- build --features macos-private-api --target aarch64-apple-darwin && node scripts/collect-release.mjs --target aarch64-apple-darwin",
-    "desktop:build:macos-x64": "npm run tauri -- build --features macos-private-api --target x86_64-apple-darwin && node scripts/collect-release.mjs --target x86_64-apple-darwin",
-    "clean": "node scripts/clean.mjs"
+    "desktop:dev": "node scripts/tauri-dev.mjs",
+    "desktop:build": "node scripts/tauri-build.mjs && node scripts/collect-release.mjs",
+    "desktop:build:macos-arm64": "node scripts/tauri-build.mjs --target aarch64-apple-darwin && node scripts/collect-release.mjs --target aarch64-apple-darwin",
+    "desktop:build:macos-x64": "node scripts/tauri-build.mjs --target x86_64-apple-darwin && node scripts/collect-release.mjs --target x86_64-apple-darwin",
+    "clean": "node scripts/clean.mjs",
+    "desktop:build:windows-x64": "node scripts/tauri-build.mjs --target x86_64-pc-windows-msvc && node scripts/collect-release.mjs --target x86_64-pc-windows-msvc"
   },
   "dependencies": {
     "@tauri-apps/api": "latest",

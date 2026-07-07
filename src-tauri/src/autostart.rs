@@ -1,4 +1,6 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(target_os = "macos")]
+use std::path::PathBuf;
 
 pub fn apply(enabled: bool, root: &Path) -> Result<(), String> {
     #[cfg(target_os = "windows")]
