@@ -245,6 +245,23 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [updateDialogOpen, updateStatus?.status]);
 
+  useEffect(() => {
+    if (route.view === 'popup') return undefined;
+    function handleCommandW(event) {
+      const key = String(event.key || '').toLowerCase();
+      if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || key !== 'w') return;
+      // macOS 的 Command+W 是关闭当前窗口的系统习惯；这里将它固定为隐藏主界面，保留后台监听、托盘和全局快捷键。
+      // Command+W is the macOS convention for closing the current window; ClipAnchor maps it to hiding the main UI while keeping monitoring, tray, and shortcuts alive.
+      event.preventDefault();
+      event.stopPropagation();
+      api.closeMainWindow().catch((error) => console.error('ClipAnchor Command+W hide failed:', error));
+    }
+    window.addEventListener('keydown', handleCommandW, true);
+    return () => {
+      window.removeEventListener('keydown', handleCommandW, true);
+    };
+  }, [route.view]);
+
   if (route.view === 'popup') {
     return <PopupWindow id={route.id} />;
   }

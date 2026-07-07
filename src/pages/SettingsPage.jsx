@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { BadgeCheck, Clock3, Database, Download, FolderOpen, HelpCircle, Keyboard, MapPinned, Minus, Palette, Plus, Power, RefreshCw, RotateCcw, Trash2, Upload } from 'lucide-react';
 import { api } from '../api.js';
 import { captureShortcutValue, formatShortcutForDisplay, normalizeShortcutForStorage } from '../shortcutDisplay.js';
@@ -23,13 +24,87 @@ function Segmented({ value, options, onChange }) {
   );
 }
 
+function estimateHelpBubbleWidth(text) {
+  const content = Array.from(String(text || '').trim());
+  const weightedLength = content.reduce((sum, char) => {
+    if (/\s/.test(char)) return sum + 0.32;
+    if (/[\u2e80-\u9fff\uff00-\uffef]/.test(char)) return sum + 1.05;
+    if (/[A-Z0-9]/.test(char)) return sum + 0.72;
+    return sum + 0.56;
+  }, 0);
+  const hasCjk = content.some((char) => /[\u2e80-\u9fff\uff00-\uffef]/.test(char));
+  const targetLineUnits = hasCjk ? 18 : 34;
+  const estimatedLines = Math.max(1, Math.ceil(weightedLength / targetLineUnits));
+  const balancedUnits = Math.ceil(weightedLength / Math.min(3, estimatedLines));
+  const preferred = Math.round(42 + balancedUnits * (hasCjk ? 13.5 : 8.2));
+  const viewportMax = Math.max(180, window.innerWidth - 36);
+  // 气泡按“预计行数 + 文本长度”估算宽度，而不是固定宽度，避免短文案过宽、长文案最后一行只剩一两个字。
+  // Bubble width is estimated from expected line count plus text length instead of a fixed value, avoiding oversized short hints and one-word trailing lines.
+  return Math.min(Math.max(168, preferred), Math.min(360, viewportMax));
+}
+
+function calculateHelpBubblePlacement(rect, width) {
+  const margin = 18;
+  const center = rect.left + rect.width / 2;
+  const viewportWidth = window.innerWidth;
+  const normalized = Math.max(-1, Math.min(1, (center - viewportWidth / 2) / Math.max(1, viewportWidth / 2)));
+  const anchorRatio = Math.max(0.42, Math.min(0.58, 0.5 + normalized * 0.13));
+  const unclampedLeft = center - width * anchorRatio;
+  const left = Math.min(Math.max(margin, unclampedLeft), viewportWidth - width - margin);
+  const actualAnchor = Math.max(20, Math.min(width - 20, center - left));
+  const align = actualAnchor < width * 0.45 ? 'left' : actualAnchor > width * 0.55 ? 'right' : 'center';
+  return { left, actualAnchor, align };
+}
+
 function HelpTip({ text }) {
+  const tipRef = useRef(null);
+  const [bubble, setBubble] = useState(null);
   if (!text) return null;
+
+  function showBubble() {
+    const rect = tipRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const width = estimateHelpBubbleWidth(text);
+    const { left, actualAnchor, align } = calculateHelpBubblePlacement(rect, width);
+    const fitsAbove = rect.top > 92;
+    setBubble({
+      left,
+      top: fitsAbove ? rect.top - 10 : rect.bottom + 10,
+      width,
+      anchorX: actualAnchor,
+      align,
+      placement: fitsAbove ? 'top' : 'bottom'
+    });
+  }
+
+  function hideBubble() {
+    setBubble(null);
+  }
+
   return (
-    <span className="help-tip" tabIndex="0" aria-label={text}>
-      <HelpCircle size={14} />
-      <span className="help-bubble">{text}</span>
-    </span>
+    <>
+      <span
+        ref={tipRef}
+        className="help-tip"
+        tabIndex="0"
+        aria-label={text}
+        onMouseEnter={showBubble}
+        onMouseLeave={hideBubble}
+        onFocus={showBubble}
+        onBlur={hideBubble}
+      >
+        <HelpCircle size={14} />
+      </span>
+      {bubble ? createPortal(
+        <span
+          className={`help-bubble floating-help-bubble ${bubble.placement === 'bottom' ? 'below' : 'above'} align-${bubble.align}`}
+          style={{ left: `${bubble.left}px`, top: `${bubble.top}px`, width: `${bubble.width}px`, '--help-anchor-x': `${bubble.anchorX}px` }}
+        >
+          {text}
+        </span>,
+        document.body
+      ) : null}
+    </>
   );
 }
 
@@ -178,6 +253,21 @@ function normalizeSettings(value) {
   };
 }
 
+
+function formatAutostartError(error, t) {
+  const detail = String(error || '').replace(/^MACOS_LOGIN_ITEM_FAILED:/, '').trim();
+  const isMacLoginItemError = String(error || '').includes('MACOS_LOGIN_ITEM_FAILED')
+    || detail.includes('System Events')
+    || detail.includes('login item')
+    || detail.includes('AppleEvent')
+    || detail.includes('not authorized')
+    || detail.includes('-1743')
+    || detail.includes('-1728');
+  if (!isMacLoginItemError) return detail || String(error || '');
+  const template = t('macosLoginItemError');
+  return template.replace('{detail}', detail || t('unknownError'));
+}
+
 function SettingsSoftDialog({ dialog, t, onClose }) {
   if (!dialog) return null;
   async function runConfirm() {
@@ -259,12 +349,13 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
       onBootChange({ ...boot, settings: normalizeSettings(saved) });
     } catch (error) {
       setSettings(normalizeSettings(previous));
-      showSettingsAlert(t('autoStart'), String(error));
+      showSettingsAlert(t('autoStart'), formatAutostartError(error, t));
     }
   }
 
   const update = (patch) => persist({ ...settings, ...patch });
   const updateShortcuts = (key, value) => update({ shortcuts: { ...defaultShortcuts, ...(settings.shortcuts || {}), [key]: value } });
+  const isMac = /Mac|iPhone|iPad|iPod/i.test(window.navigator?.platform || '');
 
   async function updateLogRetentionDays(value) {
     const days = Math.min(90, Math.max(1, Math.floor(Number(value) || 7)));
@@ -408,6 +499,12 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
                 </label>
               );
             })}
+            {isMac ? (
+              <label className="builtin-shortcut-row">
+                <SettingName help={t('helpShortcutCommandW')}>{t('shortcutCommandW')}</SettingName>
+                <input readOnly value="Command+W" />
+              </label>
+            ) : null}
           </div>
         </div>
 

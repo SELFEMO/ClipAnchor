@@ -3,6 +3,7 @@
 // The Objective-C runtime bridge macros expand an old cargo-clippy cfg; containing that dependency noise at the crate root keeps macOS release output focused on actionable issues.
 
 mod app_log;
+mod app_menu;
 mod autostart;
 mod clipboard_service;
 mod commands;
@@ -60,6 +61,21 @@ pub fn run() {
             let _ = crate::window_control::activate_main_window(app);
         }))
         .plugin(shortcut::plugin())
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "hide-main-window" => {
+                if let Some(state) = app.try_state::<AppState>() {
+                    log_startup_issue(state.inner(), "macOS Command+W menu accelerator requested Lite mode hide");
+                }
+                let _ = crate::window_control::hide_main_window(app);
+            }
+            "quit-app" => {
+                if let Some(state) = app.try_state::<AppState>() {
+                    log_startup_issue(state.inner(), "macOS Quit menu requested application exit");
+                }
+                app.exit(0);
+            }
+            _ => {}
+        })
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             get_bootstrap,
@@ -115,6 +131,9 @@ pub fn run() {
             log_startup_issue(&state, "Tauri setup started");
             // 启动期的托盘、快捷键和剪贴板监听都降级为可恢复错误，避免某个系统能力失败就让整个程序退出。
             // Tray, shortcut, and clipboard startup failures are treated as recoverable so one OS capability cannot close the whole app.
+            if let Err(error) = app_menu::install(app.handle()) {
+                log_startup_issue(&state, &format!("Application menu initialization skipped: {}", error));
+            }
             if let Err(error) = tray::install_tray(app.handle()) {
                 log_startup_issue(&state, &format!("Tray initialization skipped: {}", error));
             }

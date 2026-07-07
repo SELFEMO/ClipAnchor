@@ -839,6 +839,7 @@ HELPER_SCRIPT={helper}
 LOG_FILE={log}
 APP_PID={pid}
 MOUNT_POINT="$(mktemp -d /tmp/clipanchor-update.XXXXXX)"
+DATA_BACKUP_DIR=""
 
 log() {{
   printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "$LOG_FILE" 2>/dev/null || true
@@ -855,6 +856,9 @@ applescript_quote() {{
 cleanup() {{
   hdiutil detach "$MOUNT_POINT" -quiet >/dev/null 2>&1 || true
   rmdir "$MOUNT_POINT" >/dev/null 2>&1 || true
+  if [ -n "$DATA_BACKUP_DIR" ]; then
+    rm -rf "$DATA_BACKUP_DIR" >/dev/null 2>&1 || true
+  fi
 }}
 trap cleanup EXIT
 
@@ -871,7 +875,16 @@ while kill -0 "$APP_PID" >/dev/null 2>&1; do
   fi
   sleep 0.25
 done
-log "ClipAnchor exited; attaching DMG: $DMG_PATH"
+log "ClipAnchor exited; preparing data backup"
+# 兼容旧版本仍把 data 放在 .app 内部的用户；覆盖前备份、覆盖后恢复，避免升级瞬间把 settings.json 和数据库删除。
+# Users from older builds may still have data inside the .app; backing up before replacement and restoring after copy prevents settings.json and the database from being deleted during update.
+TARGET_DATA="$TARGET_APP/Contents/MacOS/data"
+if [ -d "$TARGET_DATA" ]; then
+  DATA_BACKUP_DIR="$(mktemp -d /tmp/clipanchor-data.XXXXXX)"
+  log "backing up legacy bundle data from $TARGET_DATA to $DATA_BACKUP_DIR"
+  ditto "$TARGET_DATA" "$DATA_BACKUP_DIR/data" >> "$LOG_FILE" 2>&1 || log "legacy bundle data backup failed; continuing because Application Support data is primary on new versions"
+fi
+log "attaching DMG: $DMG_PATH"
 hdiutil attach "$DMG_PATH" -nobrowse -quiet -mountpoint "$MOUNT_POINT"
 SOURCE_APP="$(find "$MOUNT_POINT" -maxdepth 2 -name "$TARGET_NAME" -type d | head -n 1)"
 if [ -z "$SOURCE_APP" ]; then
@@ -890,6 +903,14 @@ fi
 if [ ! -d "$TARGET_APP" ]; then
   log "target app is missing after copy; aborting restart"
   exit 1
+fi
+if [ -n "$DATA_BACKUP_DIR" ] && [ -d "$DATA_BACKUP_DIR/data" ]; then
+  # 新版本会优先使用 Application Support，但仍恢复旧 data 目录，保证跨版本迁移和回滚时配置不丢。
+  # New builds prefer Application Support, but the legacy data directory is still restored so migration and rollback keep user settings intact.
+  log "restoring legacy bundle data into updated app"
+  rm -rf "$TARGET_APP/Contents/MacOS/data"
+  mkdir -p "$TARGET_APP/Contents/MacOS"
+  ditto "$DATA_BACKUP_DIR/data" "$TARGET_APP/Contents/MacOS/data" >> "$LOG_FILE" 2>&1 || log "legacy bundle data restore failed; Application Support data remains the primary persistence location"
 fi
 /usr/bin/touch "$TARGET_APP" >/dev/null 2>&1 || true
 if [ -x /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister ]; then

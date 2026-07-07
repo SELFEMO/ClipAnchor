@@ -5140,3 +5140,44 @@ h1 {
     width: 100%;
   }
 }
+
+/* Fixed help bubbles escape the scroll/card clipping area so right-edge settings such as Auto-hide actions and Launch at startup remain readable. */
+/* 固定定位的帮助气泡会脱离滚动区和卡片裁剪，因此右侧的“弹窗按钮自动隐藏”“开机自启动”等说明不会再被容器截断。 */
+.floating-help-bubble {
+  position: fixed !important;
+  z-index: 1000 !important;
+  left: 0;
+  top: 0;
+  right: auto !important;
+  bottom: auto !important;
+  opacity: 1 !important;
+  pointer-events: none;
+  transform: translateY(-100%) !important;
+  width: min(260px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  white-space: normal;
+}
+.floating-help-bubble.below {
+  transform: none !important;
+}
+
+.shortcut-grid .builtin-shortcut-row input {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--surface) 68%, transparent);
+}
+
+/* Adaptive help bubble sizing and anchoring */
+/* 自适应帮助气泡宽度与锚点：根据文案长度决定宽度，并让图标在气泡中保持合理比例，避免过度偏向一侧或末行只剩一个字。 */
+.floating-help-bubble {
+  max-width: min(360px, calc(100vw - 36px)) !important;
+  min-width: min(168px, calc(100vw - 36px));
+  overflow-wrap: anywhere;
+  word-break: normal;
+  line-break: loose;
+  text-wrap: balance;
+  text-align: left;
+}
+
+.floating-help-bubble.align-center {
+  text-align: left;
+}
