@@ -1,8 +1,7 @@
-[source.crates-io]
-replace-with = "rsproxy-sparse"
-
-[source.rsproxy-sparse]
-registry = "sparse+https://rsproxy.cn/index/"
+# 不在项目内强制替换 crates.io 到某个镜像源，是为了避免某个镜像 DNS 或服务异常时导致所有平台构建失败。
+# The project does not force crates.io to a specific mirror so builds do not fail globally when one mirror has DNS or service issues.
+[registries.crates-io]
+protocol = "sparse"
 
 [net]
 git-fetch-with-cli = true

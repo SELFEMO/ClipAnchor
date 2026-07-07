@@ -86,6 +86,25 @@ pub fn startup_background_check(app: &AppHandle, paths: &DataPaths, started_in_l
     thread::spawn(move || {
         let status = perform_update_check(&paths_for_thread, "startup_background", true, false);
         let _ = save_status(&paths_for_thread, &status);
+
+        #[cfg(target_os = "windows")]
+        if status.install_ready {
+            // Windows 自动更新必须在下载完成后直接移交给独立安装脚本，是为了让“自动更新”真正完成覆盖安装而不是只停在待安装状态。
+            // Windows auto update is handed to a detached installer script immediately after download so Auto Update completes replacement instead of stopping at a ready-to-install state.
+            app_log::info(&paths_for_thread, "update", "Windows auto update package is ready; starting silent replacement flow");
+            if let Err(error) = install_downloaded_update(&app_for_thread, &paths_for_thread) {
+                app_log::error(&paths_for_thread, "update", format!("Windows auto update install handoff failed: {}", error));
+                let mut failed = status.clone();
+                failed.status = "update_failed".into();
+                failed.update_failed = true;
+                failed.attention_required = true;
+                failed.message = Some("windows_auto_install_handoff_failed".into());
+                let _ = save_status(&paths_for_thread, &failed);
+                let _ = app_for_thread.emit("clipanchor-update-status", failed);
+            }
+            return;
+        }
+
         if !started_in_lite_mode && status.prompt_on_main_open {
             // 只有可操作的更新结果才主动通知前端，是为了避免启动后把“正在检查/无更新/无安装包”误弹成手动检查窗口。
             // Only actionable update results notify the frontend so startup never misopens a manual-check dialog for checking, no-update, or missing-package states.
@@ -155,15 +174,15 @@ pub fn install_downloaded_update(app: &AppHandle, paths: &DataPaths) -> Result<U
         return Err("No installer package or release URL is available".into());
     }
 
-    // macOS 的 DMG 更新需要由独立脚本在本进程退出后覆盖 .app，否则正在运行的二进制会锁住自身包内容。
-    // macOS DMG updates are handed to a helper script after this process exits because a running binary can lock its own app bundle.
+    // 覆盖式更新需要由独立安装脚本在本进程退出后执行，是为了避免运行中的二进制锁住自身安装目录。
+    // Replacement updates are handed to a detached installer after this process exits so the running binary does not lock its own install directory.
     status.status = "installing".into();
     status.prompt_on_main_open = false;
     status.attention_required = false;
-    status.message = Some(if quit_after_launch { "macos_dmg_auto_install_started" } else { "installer_opened" }.into());
+    status.message = Some(installer_handoff_message(quit_after_launch).into());
     status.checked_at = now_string();
     let _ = save_status(paths, &status);
-    app_log::info(paths, "update", if quit_after_launch { "macOS DMG auto installer launched" } else { "installer opened for downloaded update" });
+    app_log::info(paths, "update", installer_handoff_log_message(quit_after_launch));
     if quit_after_launch {
         app.exit(0);
     }
@@ -312,10 +331,12 @@ fn asset_score(asset: &GitHubAsset, platform: &PlatformKind, arch: &str, lang: &
 
     match platform {
         PlatformKind::Windows => {
-            if extension == "exe" {
-                score += 700;
-            } else if extension == "msi" {
-                score += 500;
+            if extension == "msi" {
+                // MSI 有标准静默参数和退出码，更适合作为无人值守覆盖更新的首选包；EXE 仍作为兼容兜底。
+                // MSI has standard silent arguments and exit codes, making it the preferred unattended update package while EXE remains a compatible fallback.
+                score += 760;
+            } else if extension == "exe" {
+                score += 650;
             } else {
                 return None;
             }
@@ -520,21 +541,16 @@ fn open_installer_path(app: &AppHandle, paths: &DataPaths, path: &Path) -> Resul
     #[cfg(not(target_os = "macos"))]
     {
         let _ = app;
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
         let _ = paths;
     }
 
     #[cfg(target_os = "windows")]
     {
-        let extension = path.extension().and_then(|value| value.to_str()).unwrap_or_default().to_lowercase();
-        if extension == "msi" {
-            let mut command = Command::new("msiexec");
-            command.arg("/i").arg(path);
-            spawn_silent_child_process(command)?;
-        } else {
-            let command = Command::new(path);
-            spawn_silent_child_process(command)?;
-        }
-        return Ok(false);
+        install_windows_package_update(paths, path)?;
+        return Ok(true);
     }
 
     #[cfg(target_os = "macos")]
@@ -553,6 +569,195 @@ fn open_installer_path(app: &AppHandle, paths: &DataPaths, path: &Path) -> Resul
         Command::new("xdg-open").arg(path).spawn().map_err(|error| error.to_string())?;
         return Ok(false);
     }
+}
+
+
+#[cfg(target_os = "windows")]
+fn install_windows_package_update(paths: &DataPaths, installer_path: &Path) -> Result<(), String> {
+    let extension = installer_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_lowercase();
+    if !matches!(extension.as_str(), "exe" | "msi") {
+        return Err("Windows update package must be an EXE or MSI installer".into());
+    }
+
+    let installer_path = installer_path.canonicalize().unwrap_or_else(|_| installer_path.to_path_buf());
+    let update_dir = paths.data.join(UPDATE_DIR);
+    fs::create_dir_all(&update_dir).map_err(|error| error.to_string())?;
+    let script_path = update_dir.join("apply_windows_update.ps1");
+    let log_path = paths.logs.join("windows-update.log");
+    let current_exe = std::env::current_exe().map_err(|error| error.to_string())?;
+
+    fs::write(
+        &script_path,
+        windows_installer_script(&installer_path, &current_exe, &log_path, std::process::id()),
+    )
+    .map_err(|error| error.to_string())?;
+
+    let mut command = Command::new("powershell");
+    command
+        .arg("-NoProfile")
+        .arg("-NonInteractive")
+        .arg("-ExecutionPolicy")
+        .arg("Bypass")
+        .arg("-WindowStyle")
+        .arg("Hidden")
+        .arg("-File")
+        .arg(&script_path);
+    // Windows 覆盖更新必须由独立 PowerShell 接管，是为了让主进程退出后再静默安装并重新启动，避免运行中的 exe 被锁定或生成多个副本。  
+    // Windows replacement updates are delegated to an independent PowerShell script so installation happens after the main process exits, avoiding locked executables or duplicate copies.
+    spawn_silent_child_process(command)
+}
+
+#[cfg(target_os = "windows")]
+fn windows_installer_script(installer_path: &Path, current_exe: &Path, log_path: &Path, app_pid: u32) -> String {
+    format!(
+        r###"
+$ErrorActionPreference = 'Stop'
+$InstallerPath = {installer}
+$CurrentExe = {current_exe}
+$LogFile = {log_file}
+$AppPid = {pid}
+$InstallerExtension = [System.IO.Path]::GetExtension($InstallerPath).TrimStart('.').ToLowerInvariant()
+$ProcessName = [System.IO.Path]::GetFileNameWithoutExtension($CurrentExe)
+function Write-UpdateLog([string]$Message) {{
+  $directory = Split-Path -Parent $LogFile
+  if ($directory -and -not (Test-Path -LiteralPath $directory)) {{ New-Item -ItemType Directory -Force -Path $directory | Out-Null }}
+  Add-Content -LiteralPath $LogFile -Encoding UTF8 -Value "$(Get-Date -Format o) $Message"
+}}
+function Find-RestartExe {{
+  $candidates = New-Object System.Collections.Generic.List[string]
+  if ($CurrentExe) {{ $candidates.Add($CurrentExe) }}
+  $roots = @($env:ProgramFiles, ${{env:ProgramFiles(x86)}}, (Join-Path $env:LOCALAPPDATA 'Programs'), $env:LOCALAPPDATA) | Where-Object {{ $_ -and $_.Trim() -ne '' }}
+  foreach ($root in $roots) {{
+    $candidates.Add((Join-Path $root 'ClipAnchor\clipanchor.exe'))
+    $candidates.Add((Join-Path $root 'ClipAnchor\ClipAnchor.exe'))
+  }}
+  foreach ($candidate in $candidates) {{
+    if ($candidate -and (Test-Path -LiteralPath $candidate)) {{ return $candidate }}
+  }}
+  return $CurrentExe
+}}
+function Wait-ForClipAnchorExit {{
+  if ($AppPid -gt 0) {{
+    try {{
+      Write-UpdateLog "waiting for ClipAnchor pid $AppPid to exit"
+      Wait-Process -Id $AppPid -Timeout 45 -ErrorAction SilentlyContinue
+    }} catch {{
+      Write-UpdateLog "pid wait warning: $($_.Exception.Message)"
+    }}
+  }}
+  $deadline = (Get-Date).AddSeconds(45)
+  while ((Get-Date) -lt $deadline) {{
+    $running = @(Get-Process -Name $ProcessName -ErrorAction SilentlyContinue | Where-Object {{ $_.Id -ne $PID }})
+    if ($running.Count -eq 0) {{ return }}
+    Start-Sleep -Milliseconds 500
+  }}
+  throw "ClipAnchor did not exit before installer timeout"
+}}
+function Quote-ProcessArg([string]$Value) {{
+  if ($null -eq $Value) {{ return '""' }}
+  if ($Value -notmatch '[\s"]') {{ return $Value }}
+  return '"' + ($Value -replace '"', '\"') + '"'
+}}
+function Start-ElevatedAndWait([string]$FilePath, [string[]]$Arguments) {{
+  $argumentLine = ($Arguments | ForEach-Object {{ Quote-ProcessArg $_ }}) -join ' '
+  Write-UpdateLog "starting installer: $FilePath $argumentLine"
+  try {{
+    $process = Start-Process -FilePath $FilePath -ArgumentList $argumentLine -Wait -PassThru -Verb RunAs -WindowStyle Hidden
+  }} catch {{
+    Write-UpdateLog "elevated installer start failed, retrying without WindowStyle: $($_.Exception.Message)"
+    $process = Start-Process -FilePath $FilePath -ArgumentList $argumentLine -Wait -PassThru -Verb RunAs
+  }}
+  if ($null -eq $process) {{ return 0 }}
+  return [int]$process.ExitCode
+}}
+try {{
+  Write-UpdateLog 'Windows update apply script started'
+  if (-not (Test-Path -LiteralPath $InstallerPath)) {{ throw "installer not found: $InstallerPath" }}
+  Wait-ForClipAnchorExit
+  if ($InstallerExtension -eq 'msi') {{
+    $exitCode = Start-ElevatedAndWait "$env:SystemRoot\System32\msiexec.exe" @('/i', $InstallerPath, '/qn', '/norestart')
+  }} elseif ($InstallerExtension -eq 'exe') {{
+    $exitCode = Start-ElevatedAndWait $InstallerPath @('/S')
+  }} else {{
+    throw "unsupported installer extension: $InstallerExtension"
+  }}
+  Write-UpdateLog "installer finished with exit code $exitCode"
+  if (@(0, 3010, 1641) -notcontains $exitCode) {{ throw "installer failed with exit code $exitCode" }}
+  Start-Sleep -Seconds 2
+  $restartExe = Find-RestartExe
+  if (-not $restartExe -or -not (Test-Path -LiteralPath $restartExe)) {{ throw "cannot locate ClipAnchor executable to restart" }}
+  Write-UpdateLog "restarting ClipAnchor from $restartExe"
+  Start-Process -FilePath $restartExe -ArgumentList @('--portable') | Out-Null
+  Write-UpdateLog 'Windows update apply script finished'
+}} catch {{
+  Write-UpdateLog "Windows update apply failed: $($_.Exception.Message)"
+  exit 1
+}}
+"###,
+        installer = powershell_literal(&installer_path.to_string_lossy()),
+        current_exe = powershell_literal(&current_exe.to_string_lossy()),
+        log_file = powershell_literal(&log_path.to_string_lossy()),
+        pid = app_pid,
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn powershell_literal(value: &str) -> String {
+    format!("'{}'", powershell_quote(value))
+}
+
+fn installer_handoff_message(quit_after_launch: bool) -> &'static str {
+    if !quit_after_launch {
+        return "installer_opened";
+    }
+
+    // 平台分支拆到独立函数里，是为了让 Windows/macOS 编译器只看到当前平台的返回路径，避免 cfg 内提前 return 导致的 unreachable_code 警告。
+    // Platform branches live in separate functions so each compiler target only sees its own return path, avoiding unreachable_code warnings caused by cfg-gated early returns.
+    platform_auto_install_started_message()
+}
+
+#[cfg(target_os = "windows")]
+fn platform_auto_install_started_message() -> &'static str {
+    "windows_auto_install_started"
+}
+
+#[cfg(target_os = "macos")]
+fn platform_auto_install_started_message() -> &'static str {
+    "macos_dmg_auto_install_started"
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn platform_auto_install_started_message() -> &'static str {
+    "installer_opened"
+}
+
+fn installer_handoff_log_message(quit_after_launch: bool) -> &'static str {
+    if !quit_after_launch {
+        return "installer opened for downloaded update";
+    }
+
+    // 日志文案同样按平台函数隔离，是为了保持构建输出干净，同时不改变 Windows/macOS 自动安装流程。
+    // Log text is isolated the same way to keep build output clean without changing the Windows/macOS auto-install behavior.
+    platform_auto_install_log_message()
+}
+
+#[cfg(target_os = "windows")]
+fn platform_auto_install_log_message() -> &'static str {
+    "Windows automatic installer launched"
+}
+
+#[cfg(target_os = "macos")]
+fn platform_auto_install_log_message() -> &'static str {
+    "macOS DMG auto installer launched"
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn platform_auto_install_log_message() -> &'static str {
+    "installer opened for downloaded update"
 }
 
 #[cfg(target_os = "macos")]

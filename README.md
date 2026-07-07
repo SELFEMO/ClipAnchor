@@ -146,3 +146,8 @@ Actual output depends on the host operating system, CPU architecture, and instal
 ## License
 
 ClipAnchor is licensed under the Apache License 2.0. See the root `LICENSE` file for the full license text.
+
+## Windows Build Notes
+
+The project does not force a specific Rust registry mirror in `.cargo/config.toml`. This avoids blocking Windows, macOS, and Linux builds when one mirror has DNS or service issues. Configure a mirror in your local Cargo settings or environment only when your network requires it.
+
