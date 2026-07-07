@@ -2,6 +2,10 @@ use crate::{app_log, models::UpdateStatusPayload, paths::DataPaths};
 use chrono::{SecondsFormat, Utc};
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter};
+#[cfg(target_os = "macos")]
+use std::os::unix::fs::PermissionsExt;
+#[cfg(target_os = "macos")]
+use std::process::Stdio;
 use std::{
     cmp::Ordering,
     fs,
@@ -53,7 +57,16 @@ enum LinuxPackageKind {
     Rpm,
 }
 
-pub fn startup_background_check(app: &AppHandle, paths: &DataPaths, started_in_lite_mode: bool) -> UpdateStatusPayload {
+pub fn startup_background_check(app: &AppHandle, paths: &DataPaths, started_in_lite_mode: bool, auto_update_enabled: bool) -> UpdateStatusPayload {
+    if !auto_update_enabled {
+        // 自动更新关闭时仍写入明确状态，是为了让设置页显示真实状态且启动阶段不再访问网络。
+        // When auto update is disabled, an explicit status is saved so Settings shows the real state and startup never touches the network.
+        let disabled = disabled_status("startup_background");
+        let _ = save_status(paths, &disabled);
+        app_log::info(paths, "update", "startup update check skipped because auto update is disabled");
+        return disabled;
+    }
+
     // 启动检查放入后台线程，是为了让自启动轻量模式和普通启动都不被 GitHub 网络延迟阻塞。
     // Startup checks run in a background thread so GitHub network latency never blocks Lite startup or normal launch.
     let _ = clear_update_packages(paths);
@@ -73,9 +86,9 @@ pub fn startup_background_check(app: &AppHandle, paths: &DataPaths, started_in_l
     thread::spawn(move || {
         let status = perform_update_check(&paths_for_thread, "startup_background", true, false);
         let _ = save_status(&paths_for_thread, &status);
-        if !started_in_lite_mode && status.update_available {
-            // 普通手动启动时发现新版本要主动通知前端，是为了避免启动检查已经完成但用户看不到更新提示。
-            // A normal manual startup emits the update result so users see the prompt even when the check finishes after the main UI has loaded.
+        if !started_in_lite_mode && status.prompt_on_main_open {
+            // 只有可操作的更新结果才主动通知前端，是为了避免启动后把“正在检查/无更新/无安装包”误弹成手动检查窗口。
+            // Only actionable update results notify the frontend so startup never misopens a manual-check dialog for checking, no-update, or missing-package states.
             let _ = app_for_thread.emit("clipanchor-update-status", status);
         }
     });
@@ -84,9 +97,28 @@ pub fn startup_background_check(app: &AppHandle, paths: &DataPaths, started_in_l
 }
 
 pub fn main_open_check(paths: &DataPaths) -> UpdateStatusPayload {
-    let status = read_status(paths).unwrap_or_else(|| idle_status("main_open"));
+    let mut status = read_status(paths).unwrap_or_else(|| idle_status("main_open"));
+    if status.prompt_on_main_open && !is_promptable_update(&status) {
+        // 旧状态文件可能来自上一轮手动检查或无安装包发布；读取时清掉提示位，避免每次进入主界面都重复弹窗。
+        // Old status files may come from a previous manual check or a release without packages; clearing the prompt bit prevents repeated dialogs on every main-window entry.
+        status.prompt_on_main_open = false;
+        status.attention_required = false;
+        let _ = save_status(paths, &status);
+    }
     app_log::info(paths, "update", format!("main window update status loaded; status={}", status.status));
     status
+}
+
+pub fn dismiss_prompt(paths: &DataPaths) -> Result<UpdateStatusPayload, String> {
+    let mut status = read_status(paths).unwrap_or_else(|| idle_status("dismiss"));
+    // “稍后提醒”只影响主动弹窗，不清除可安装更新状态，这样检查更新按钮仍能显示红点并继续安装。
+    // Later reminders affect only proactive dialogs, not the installable update state, so the update button can keep its dot and still install.
+    status.prompt_on_main_open = false;
+    if !is_promptable_update(&status) {
+        status.attention_required = false;
+    }
+    save_status(paths, &status)?;
+    Ok(status)
 }
 
 pub fn manual_check(paths: &DataPaths, source: &str) -> UpdateStatusPayload {
@@ -111,26 +143,30 @@ pub fn manual_check(paths: &DataPaths, source: &str) -> UpdateStatusPayload {
     checking
 }
 
-pub fn install_downloaded_update(paths: &DataPaths) -> Result<UpdateStatusPayload, String> {
+pub fn install_downloaded_update(app: &AppHandle, paths: &DataPaths) -> Result<UpdateStatusPayload, String> {
     let mut status = read_status(paths).ok_or_else(|| "No downloaded update is available".to_string())?;
+    let mut quit_after_launch = false;
     let local_path = status.downloaded_path.clone().unwrap_or_default();
     if !local_path.trim().is_empty() && Path::new(&local_path).exists() {
-        open_installer_path(Path::new(&local_path))?;
+        quit_after_launch = open_installer_path(app, paths, Path::new(&local_path))?;
     } else if let Some(url) = status.asset_url.clone().filter(|value| !value.trim().is_empty()) {
         open_external_url(&url)?;
     } else {
         return Err("No installer package or release URL is available".into());
     }
 
-    // 安装动作由系统安装器接管，是为了避免 ClipAnchor 在运行中直接替换自身可执行文件导致平台权限和文件锁问题。
-    // Installation is handed to the system installer so ClipAnchor does not replace its own executable while platform permissions and file locks are active.
+    // macOS 的 DMG 更新需要由独立脚本在本进程退出后覆盖 .app，否则正在运行的二进制会锁住自身包内容。
+    // macOS DMG updates are handed to a helper script after this process exits because a running binary can lock its own app bundle.
     status.status = "installing".into();
     status.prompt_on_main_open = false;
     status.attention_required = false;
-    status.message = Some("installer_opened".into());
+    status.message = Some(if quit_after_launch { "macos_dmg_auto_install_started" } else { "installer_opened" }.into());
     status.checked_at = now_string();
     let _ = save_status(paths, &status);
-    app_log::info(paths, "update", "installer opened for downloaded update");
+    app_log::info(paths, "update", if quit_after_launch { "macOS DMG auto installer launched" } else { "installer opened for downloaded update" });
+    if quit_after_launch {
+        app.exit(0);
+    }
     Ok(status)
 }
 
@@ -162,7 +198,7 @@ fn perform_update_check(paths: &DataPaths, source: &str, auto_download: bool, in
         let mut status = base_status("no_update", source);
         status.service_enabled = true;
         status.current_version = Some(current_version);
-        status.prompt_on_main_open = interactive;
+        status.prompt_on_main_open = false;
         status.message = Some("up_to_date".into());
         return status;
     };
@@ -170,8 +206,8 @@ fn perform_update_check(paths: &DataPaths, source: &str, auto_download: bool, in
     let mut status = base_status("update_available", source);
     status.service_enabled = true;
     status.update_available = true;
-    status.prompt_on_main_open = true;
-    status.attention_required = true;
+    status.prompt_on_main_open = false;
+    status.attention_required = false;
     status.current_version = Some(current_version.clone());
     status.latest_version = Some(selected.latest_version.clone());
     status.release_tag = Some(selected.release_tag.clone());
@@ -180,8 +216,12 @@ fn perform_update_check(paths: &DataPaths, source: &str, auto_download: bool, in
 
     let Some(asset) = selected.asset.clone() else {
         app_log::warn(paths, "update", format!("no compatible release asset found for tag {}", selected.release_tag));
+        // 新 tag 没有当前系统安装包时不能进入可安装状态，是为了防止“发现更新”后按钮没有有效更新包可打开。
+        // A new tag without a package for the current system must not become installable, preventing update prompts with no valid installer to open.
         status.status = "asset_unavailable".into();
         status.update_failed = true;
+        status.prompt_on_main_open = false;
+        status.attention_required = false;
         status.message = Some("asset_unavailable".into());
         return status;
     };
@@ -203,6 +243,8 @@ fn perform_update_check(paths: &DataPaths, source: &str, auto_download: bool, in
             app_log::info(paths, "update", format!("update package downloaded: {}", path.to_string_lossy()));
             status.status = "downloaded".into();
             status.install_ready = true;
+            status.prompt_on_main_open = should_prompt_after_background_check(source, interactive);
+            status.attention_required = true;
             status.downloaded_path = Some(path.to_string_lossy().to_string());
             status.downloaded_bytes = path.metadata().ok().map(|metadata| metadata.len());
             status.message = Some("package_ready".into());
@@ -213,6 +255,8 @@ fn perform_update_check(paths: &DataPaths, source: &str, auto_download: bool, in
             status.status = "update_failed".into();
             status.update_failed = true;
             status.install_ready = false;
+            status.prompt_on_main_open = should_prompt_after_background_check(source, interactive);
+            status.attention_required = should_prompt_after_background_check(source, interactive);
             status.message = Some("download_failed".into());
             status
         }
@@ -311,8 +355,13 @@ fn asset_score(asset: &GitHubAsset, platform: &PlatformKind, arch: &str, lang: &
     if !asset.name.to_lowercase().contains("clipanchor") {
         score -= 30;
     }
+    if !asset_arch_compatible(&name, arch) {
+        return None;
+    }
     if arch_matches(&name, arch) {
-        score += 90;
+        score += 110;
+    } else if platform == &PlatformKind::Macos && name.contains("universal") {
+        score += 70;
     }
     Some(score)
 }
@@ -444,12 +493,19 @@ fn command_status(program: &str, args: &[&str]) -> Result<(), String> {
     }
 }
 
+#[cfg(target_os = "windows")]
 fn spawn_silent_child_process(mut command: Command) -> Result<(), String> {
+    // Windows 安装器需要通过隐藏子进程启动，限定平台编译可以避免 macOS/Linux 将该辅助函数报告为未使用。
+    // Windows installers must be launched through a hidden child process, and platform-gating this helper prevents macOS/Linux from reporting it as unused.
     configure_silent_child_process(&mut command);
     command.spawn().map(|_| ()).map_err(|error| error.to_string())
 }
 
 fn configure_silent_child_process(command: &mut Command) {
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = command;
+    }
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
@@ -460,7 +516,13 @@ fn configure_silent_child_process(command: &mut Command) {
     }
 }
 
-fn open_installer_path(path: &Path) -> Result<(), String> {
+fn open_installer_path(app: &AppHandle, paths: &DataPaths, path: &Path) -> Result<bool, String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        let _ = paths;
+    }
+
     #[cfg(target_os = "windows")]
     {
         let extension = path.extension().and_then(|value| value.to_str()).unwrap_or_default().to_lowercase();
@@ -472,20 +534,198 @@ fn open_installer_path(path: &Path) -> Result<(), String> {
             let command = Command::new(path);
             spawn_silent_child_process(command)?;
         }
-        return Ok(());
+        return Ok(false);
     }
 
     #[cfg(target_os = "macos")]
     {
+        let extension = path.extension().and_then(|value| value.to_str()).unwrap_or_default().to_lowercase();
+        if extension == "dmg" {
+            install_macos_dmg_update(app, paths, path)?;
+            return Ok(true);
+        }
         Command::new("open").arg(path).spawn().map_err(|error| error.to_string())?;
-        return Ok(());
+        return Ok(false);
     }
 
     #[cfg(target_os = "linux")]
     {
         Command::new("xdg-open").arg(path).spawn().map_err(|error| error.to_string())?;
-        return Ok(());
+        return Ok(false);
     }
+}
+
+#[cfg(target_os = "macos")]
+fn install_macos_dmg_update(app: &AppHandle, paths: &DataPaths, dmg_path: &Path) -> Result<(), String> {
+    let _ = app;
+    let running_app = current_macos_app_bundle().ok_or_else(|| "Cannot locate the running ClipAnchor.app bundle for automatic DMG installation".to_string())?;
+    let target_app = macos_install_target_app_bundle(&running_app);
+    let update_dir = paths.data.join(UPDATE_DIR);
+    fs::create_dir_all(&update_dir).map_err(|error| error.to_string())?;
+    let helper_path = update_dir.join("copy_macos_update.sh");
+    let script_path = update_dir.join("apply_macos_update.sh");
+    let log_path = paths.logs.join("macos-update.log");
+
+    fs::write(&helper_path, macos_copy_helper_script()).map_err(|error| error.to_string())?;
+    fs::set_permissions(&helper_path, fs::Permissions::from_mode(0o755)).map_err(|error| error.to_string())?;
+    fs::write(
+        &script_path,
+        macos_dmg_installer_script(dmg_path, &target_app, &helper_path, &log_path, std::process::id()),
+    ).map_err(|error| error.to_string())?;
+    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755)).map_err(|error| error.to_string())?;
+
+    // 更新脚本必须脱离当前进程组运行，是为了在 ClipAnchor 退出后继续完成挂载、覆盖和重启，不会被父进程退出顺带中断。
+    // The updater script must run detached from the current process group so mounting, replacement, and restart continue after ClipAnchor exits.
+    let mut command = Command::new("/usr/bin/nohup");
+    command
+        .arg("/bin/sh")
+        .arg(&script_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    command.spawn().map(|_| ()).map_err(|error| error.to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn current_macos_app_bundle() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    exe.ancestors()
+        .find(|path| path.extension().and_then(|value| value.to_str()).map(|value| value.eq_ignore_ascii_case("app")).unwrap_or(false))
+        .map(Path::to_path_buf)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_install_target_app_bundle(running_app: &Path) -> PathBuf {
+    if running_app.starts_with("/Volumes/") {
+        // 从 DMG 只读卷直接运行时不能覆盖自身；改为覆盖 /Applications 中同名应用，避免在挂载卷里复制失败或留下多个测试副本。
+        // When running directly from a read-only DMG volume, replacing itself is impossible; targeting /Applications avoids copy failures and duplicate test bundles.
+        if let Some(name) = running_app.file_name() {
+            return PathBuf::from("/Applications").join(name);
+        }
+    }
+    running_app.to_path_buf()
+}
+
+#[cfg(target_os = "macos")]
+fn macos_copy_helper_script() -> &'static str {
+    r#"#!/bin/sh
+set -eu
+SOURCE_APP="$1"
+TARGET_APP="$2"
+rm -rf "$TARGET_APP"
+ditto "$SOURCE_APP" "$TARGET_APP"
+xattr -dr com.apple.quarantine "$TARGET_APP" 2>/dev/null || true
+"#
+}
+
+#[cfg(target_os = "macos")]
+fn macos_dmg_installer_script(dmg_path: &Path, target_app: &Path, helper_path: &Path, log_path: &Path, app_pid: u32) -> String {
+    let target_name = target_app
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("ClipAnchor.app");
+    format!(
+        r###"#!/bin/sh
+set -u
+DMG_PATH={dmg}
+TARGET_APP={target}
+TARGET_NAME={target_name}
+HELPER_SCRIPT={helper}
+LOG_FILE={log}
+APP_PID={pid}
+MOUNT_POINT="$(mktemp -d /tmp/clipanchor-update.XXXXXX)"
+
+log() {{
+  printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "$LOG_FILE" 2>/dev/null || true
+}}
+
+shell_quote() {{
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}}
+
+applescript_quote() {{
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}}
+
+cleanup() {{
+  hdiutil detach "$MOUNT_POINT" -quiet >/dev/null 2>&1 || true
+  rmdir "$MOUNT_POINT" >/dev/null 2>&1 || true
+}}
+trap cleanup EXIT
+
+mkdir -p "$(dirname "$LOG_FILE")"
+log "waiting for ClipAnchor to quit"
+# 必须等当前进程完全退出后再覆盖 .app，否则 macOS 可能锁住包内二进制，导致复制失败或生成并存的重复应用。
+# The running process must fully exit before replacing the .app, otherwise macOS can keep bundle binaries locked and cause copy failures or duplicate app bundles.
+WAIT_INDEX=0
+while kill -0 "$APP_PID" >/dev/null 2>&1; do
+  WAIT_INDEX=$((WAIT_INDEX + 1))
+  if [ "$WAIT_INDEX" -gt 120 ]; then
+    log "ClipAnchor process did not exit in time; aborting update to avoid partial overwrite"
+    exit 1
+  fi
+  sleep 0.25
+done
+log "ClipAnchor exited; attaching DMG: $DMG_PATH"
+hdiutil attach "$DMG_PATH" -nobrowse -quiet -mountpoint "$MOUNT_POINT"
+SOURCE_APP="$(find "$MOUNT_POINT" -maxdepth 2 -name "$TARGET_NAME" -type d | head -n 1)"
+if [ -z "$SOURCE_APP" ]; then
+  SOURCE_APP="$(find "$MOUNT_POINT" -maxdepth 2 -name '*.app' -type d | head -n 1)"
+fi
+if [ -z "$SOURCE_APP" ]; then
+  log "no app bundle found in DMG"
+  exit 1
+fi
+log "copying $SOURCE_APP to $TARGET_APP"
+if ! "$HELPER_SCRIPT" "$SOURCE_APP" "$TARGET_APP" >> "$LOG_FILE" 2>&1; then
+  log "direct copy failed; requesting administrator privileges"
+  HELPER_CMD="$HELPER_SCRIPT $(shell_quote "$SOURCE_APP") $(shell_quote "$TARGET_APP")"
+  osascript -e "do shell script \"$(applescript_quote "$HELPER_CMD")\" with administrator privileges" >> "$LOG_FILE" 2>&1
+fi
+if [ ! -d "$TARGET_APP" ]; then
+  log "target app is missing after copy; aborting restart"
+  exit 1
+fi
+/usr/bin/touch "$TARGET_APP" >/dev/null 2>&1 || true
+if [ -x /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister ]; then
+  /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$TARGET_APP" >> "$LOG_FILE" 2>&1 || true
+fi
+EXECUTABLE_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$TARGET_APP/Contents/Info.plist" 2>/dev/null || printf 'clipanchor')"
+EXECUTABLE_PATH="$TARGET_APP/Contents/MacOS/$EXECUTABLE_NAME"
+log "opening updated app: $TARGET_APP"
+# 更新完成后必须主动重启新版应用；优先使用 LaunchServices，失败时再直接启动包内可执行文件，避免出现“安装完成但软件没有重新打开”的情况。
+# The updated app must be restarted explicitly after replacement; LaunchServices is tried first, then the bundle executable is used as a fallback so the update never appears to finish without reopening.
+/usr/bin/open -n "$TARGET_APP" >> "$LOG_FILE" 2>&1 || true
+RESTART_INDEX=0
+while [ "$RESTART_INDEX" -lt 20 ]; do
+  if pgrep -f "$TARGET_APP/Contents/MacOS" >/dev/null 2>&1 || pgrep -x "$EXECUTABLE_NAME" >/dev/null 2>&1; then
+    log "updated app is running"
+    exit 0
+  fi
+  RESTART_INDEX=$((RESTART_INDEX + 1))
+  sleep 0.5
+done
+if [ -x "$EXECUTABLE_PATH" ]; then
+  log "LaunchServices did not report a running app; starting executable fallback: $EXECUTABLE_PATH"
+  /usr/bin/nohup "$EXECUTABLE_PATH" >/dev/null 2>&1 &
+else
+  log "cannot find executable fallback at $EXECUTABLE_PATH"
+  exit 1
+fi
+"###,
+        dmg = shell_quote(&dmg_path.to_string_lossy()),
+        target = shell_quote(&target_app.to_string_lossy()),
+        target_name = shell_quote(target_name),
+        helper = shell_quote(&helper_path.to_string_lossy()),
+        log = shell_quote(&log_path.to_string_lossy()),
+        pid = app_pid,
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn shell_quote(value: &str) -> String {
+    let escaped = value.replace('\'', "'\\''");
+    format!("'{}'", escaped)
 }
 
 fn open_external_url(url: &str) -> Result<(), String> {
@@ -607,6 +847,16 @@ fn arch_matches(name: &str, arch: &str) -> bool {
     }
 }
 
+fn asset_arch_compatible(name: &str, arch: &str) -> bool {
+    let has_known_arch = contains_any(name, &["arm64", "aarch64", "x64", "x86_64", "amd64", "ia32", "i386"]);
+    if !has_known_arch || name.contains("universal") {
+        return true;
+    }
+    // 带架构后缀的安装包必须严格匹配当前架构，是为了避免 Apple Silicon 误下载 Intel 包或反过来造成更新失败。
+    // Installers with architecture suffixes must match the current architecture so Apple Silicon never downloads an Intel package, or vice versa.
+    arch_matches(name, arch)
+}
+
 fn version_from_tag(tag: &str) -> Option<String> {
     for prefix in ["pre-release-v", "release-v", "v"] {
         if let Some(value) = tag.strip_prefix(prefix) {
@@ -651,6 +901,7 @@ fn safe_asset_name(name: &str) -> String {
         .collect()
 }
 
+#[cfg(target_os = "windows")]
 fn powershell_quote(value: &str) -> String {
     value.replace('\'', "''")
 }
@@ -667,18 +918,42 @@ fn checking_status(source: &str) -> UpdateStatusPayload {
     status
 }
 
-fn failed_status(source: &str, prompt: bool, message: &str) -> UpdateStatusPayload {
+fn failed_status(source: &str, _prompt: bool, message: &str) -> UpdateStatusPayload {
     let mut status = base_status("update_failed", source);
     status.service_enabled = true;
     status.update_failed = true;
-    status.prompt_on_main_open = prompt;
-    status.attention_required = prompt;
+    // 普通网络失败不弹窗，是为了让启动检查真正静默；手动检查的错误会通过当前已打开的检查窗口展示。
+    // Plain network failures do not prompt so startup checks stay silent; manual-check errors are shown in the already-open check window.
+    status.prompt_on_main_open = false;
+    status.attention_required = false;
     status.message = Some(message.into());
     status
 }
 
+fn should_prompt_after_background_check(source: &str, interactive: bool) -> bool {
+    source == "startup_background" && !interactive
+}
+
+fn is_promptable_update(status: &UpdateStatusPayload) -> bool {
+    if status.status == "asset_unavailable" {
+        return false;
+    }
+    status.update_available && (status.install_ready || non_empty_option(status.asset_url.as_ref()))
+}
+
+fn non_empty_option(value: Option<&String>) -> bool {
+    value.map(|value| !value.trim().is_empty()).unwrap_or(false)
+}
+
 fn idle_status(source: &str) -> UpdateStatusPayload {
     base_status("idle", source)
+}
+
+fn disabled_status(source: &str) -> UpdateStatusPayload {
+    let mut status = base_status("disabled", source);
+    status.message = Some("auto_update_disabled".into());
+    status.current_version = Some(current_version());
+    status
 }
 
 fn base_status(status: &str, source: &str) -> UpdateStatusPayload {

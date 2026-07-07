@@ -28,6 +28,9 @@ fn schedule_popup(app: &AppHandle, state: &AppState, item: &ClipItem, settings: 
 }
 
 fn build_popup_window(app: &AppHandle, state: &AppState, item: &ClipItem, settings: &AppSettings, pinned: bool) -> Result<(), String> {
+    // macOS 后台弹窗先切换为辅助应用策略，是为了让提示卡跟随当前 Space 而不是被 Dock 主应用状态固定在首个桌面。
+    // macOS background popups switch to the accessory app policy first so hint cards follow the current Space instead of the Dock-backed main app Space.
+    crate::macos_native::prepare_background_popup(app);
     prune_transient_popups(app, state, pinned)?;
     let (popup_width, popup_height) = popup_size_for_item(settings, item);
     let active_count = active_popup_count(app);
@@ -42,6 +45,7 @@ fn build_popup_window(app: &AppHandle, state: &AppState, item: &ClipItem, settin
         // 已存在弹窗时只恢复置顶，不主动抢焦点，避免打断用户当前正在输入的应用。
         // When a popup already exists, only restore top-most state without stealing focus from the active application.
         existing.set_always_on_top(true).map_err(|error| error.to_string())?;
+        crate::macos_native::configure_popup_for_current_space(&existing);
         let _ = existing.show();
         return Ok(());
     }
@@ -56,11 +60,16 @@ fn build_popup_window(app: &AppHandle, state: &AppState, item: &ClipItem, settin
         .min_inner_size(260.0, 118.0)
         .position(x, y)
         .decorations(false)
+        // 透明窗口是弹窗圆角生效的原生前提；仅靠 CSS 圆角无法裁掉 WebView 宿主窗口的直角底板。
+        // A transparent native window is required for popup corners; CSS radius alone cannot clip the square WebView host surface.
         .transparent(true)
         .shadow(false)
         .resizable(true)
         .focused(false)
         .always_on_top(true)
+        // 弹窗窗口声明为所有工作区可见，是为了让 macOS 全屏 Space 中的复制提示不被限制到主窗口所在桌面。
+        // The popup is declared visible on all workspaces so macOS fullscreen Space hints are not confined to the main window's desktop.
+        .visible_on_all_workspaces(true)
         .skip_taskbar(true)
         .visible(false)
         .build()
@@ -68,6 +77,7 @@ fn build_popup_window(app: &AppHandle, state: &AppState, item: &ClipItem, settin
     // 关闭原生阴影后再裁剪窗口，是因为 Windows 的无边框阴影会额外画出 1px 白色直角边框。
     // Native shadow is disabled before clipping because Windows borderless shadows can draw an extra 1px white square border.
     let _ = window.set_shadow(false);
+    crate::macos_native::configure_popup_for_current_space(&window);
     apply_native_popup_shape(&window);
     window.set_position(Position::Logical(LogicalPosition { x, y })).map_err(|error| error.to_string())?;
     if pinned {
@@ -94,6 +104,7 @@ fn delayed_show_popup(app: &AppHandle, label: &str, pinned: bool) {
                 // 只显示弹窗，不调用 set_focus；剪贴板弹窗应像提示卡一样出现，不能抢走用户正在使用应用的键盘焦点。
                 // Only show the popup and never call set_focus; clipboard cards should appear like hints and must not steal keyboard focus.
                 let _ = window.set_shadow(false);
+                crate::macos_native::configure_popup_for_current_space(&window);
                 let _ = window.show();
                 // 显示后再次应用圆角 Region，是为了覆盖 WebView2 首次显示时重建底层窗口导致的裁剪丢失。
                 // The rounded region is reapplied after show to survive WebView2 recreating its backing window during first paint.

@@ -2,7 +2,9 @@ use crate::{app_log, database, models::{AppState, AppSettings, ClipItem, ClipKin
 use arboard::{Clipboard, ImageData};
 use chrono::Utc;
 use image::{ImageBuffer, Rgba};
-use std::{borrow::Cow, fs, io::Cursor, mem, panic::{catch_unwind, AssertUnwindSafe}, path::Path, ptr, sync::{atomic::{AtomicBool, Ordering}, Arc}, thread, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{borrow::Cow, fs, io::Cursor, panic::{catch_unwind, AssertUnwindSafe}, path::Path, sync::{atomic::{AtomicBool, Ordering}, Arc}, thread, time::{Duration, SystemTime, UNIX_EPOCH}};
+#[cfg(target_os = "windows")]
+use std::{mem, ptr};
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
@@ -169,8 +171,10 @@ fn poll_once(app: &AppHandle, state: &AppState, last_signature: &mut String) -> 
                     *last_signature = signature;
                     let item = item_from_files(paths);
                     process_item(app, state, &settings, item)?;
-                    return Ok(());
                 }
+                // macOS Finder 会同时把“真实文件 URL”和“文件名文本”放入剪贴板；只要已确认存在文件对象，就必须停止后续文本读取，避免同一次复制在文件弹窗与文本弹窗之间反复跳变。
+                // macOS Finder places both real file URLs and filename text on the pasteboard; once a file object is confirmed, text fallback must stop to prevent the same copy from bouncing between file and text popups.
+                return Ok(());
             }
         }
     }
@@ -804,7 +808,14 @@ fn read_file_paths_from_clipboard() -> Result<Vec<String>, String> {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
+fn read_file_paths_from_clipboard() -> Result<Vec<String>, String> {
+    // Finder 在多文件复制时会同时提供文件 URL 和文件名文本；优先读取原生文件 URL 才能避免被误判成拼接文本。
+    // Finder exposes file URLs and filename text for multi-file copies; reading native file URLs first prevents them from being misclassified as concatenated text.
+    crate::macos_native::read_file_paths_from_pasteboard()
+}
+
+#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
 fn read_file_paths_from_clipboard() -> Result<Vec<String>, String> {
     Ok(Vec::new())
 }
@@ -832,6 +843,14 @@ fn clipboard_change_signature(content_hash: &str) -> String {
             // Windows 会在“复制同一内容”时递增序列号；把序列号并入监听指纹，才能按需求每次复制都触发新弹窗与去重写入。
             // Windows increments the sequence number even when the same content is copied; including it lets every copy create a fresh popup and deduplicated record.
             return format!("seq:{}:{}", sequence, content_hash);
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(change_count) = crate::macos_native::pasteboard_change_count() {
+            // macOS 没有 Windows 的序列号 API，但 NSPasteboard changeCount 会在用户重新复制相同内容时递增；加入它既满足“每次复制都生成新弹窗”，也让同一次文件复制的文件/文本表示共享同一轮变化判断。
+            // macOS has no Windows sequence-number API, but NSPasteboard changeCount increments when the user copies the same content again; including it preserves per-copy popups and keeps file/text representations tied to the same pasteboard change.
+            return format!("change:{}:{}", change_count, content_hash);
         }
     }
     content_hash.to_string()
@@ -988,10 +1007,17 @@ fn copy_file_paths_to_clipboard(paths: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
+fn copy_file_paths_to_clipboard(paths: &[String]) -> Result<(), String> {
+    // macOS 必须写入 NSURL 对象，Finder 和其他应用才会把内容当作文件对象而不是路径文本粘贴。
+    // macOS must receive NSURL objects so Finder and other apps paste real file objects instead of path text.
+    crate::macos_native::write_file_paths_to_pasteboard(paths)
+}
+
+#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
 fn copy_file_paths_to_clipboard(paths: &[String]) -> Result<(), String> {
     let mut clipboard = Clipboard::new().map_err(|error| error.to_string())?;
-    // 非 Windows 平台先退化为路径文本，是为了保持 Copy 按钮可用；后续可接入平台原生文件剪贴板格式。
-    // Non-Windows builds fall back to path text to keep Copy usable; native file clipboard formats can be added per platform later.
+    // Linux 暂时回退到路径文本，是为了在未接入各桌面环境文件 MIME 格式前仍保持 Copy 可用。
+    // Linux temporarily falls back to path text so Copy remains usable before desktop-specific file MIME formats are added.
     clipboard.set_text(paths.join("\n")).map_err(|error| error.to_string())
 }

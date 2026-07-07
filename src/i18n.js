@@ -241,7 +241,13 @@ const messages = {
     refreshFavorites: 'Refresh saved items',
     backToTop: 'Back to top',
     favoritesValid: 'All saved items are still valid.',
-    favoritesInvalid: 'Some saved items point to missing resources. Delete them?'
+    favoritesInvalid: 'Some saved items point to missing resources. Delete them?',
+    versionAndUpdates: 'Version and updates',
+    softwareVersion: 'Software version',
+    autoUpdate: 'Auto update',
+    helpAutoUpdate: 'When enabled, ClipAnchor silently checks GitHub Releases at startup and downloads compatible packages in the background. It does not install anything without your confirmation.',
+    updateQuietHint: 'Startup checks stay silent. You will only be prompted when a compatible update is ready or a download fallback needs your decision.',
+    updateAttentionHint: 'An update needs your attention. You can install it now or keep the reminder dot for later.'
   },
   zh: {
     clipboard: '剪贴板',
@@ -485,7 +491,13 @@ const messages = {
     refreshFavorites: '刷新有效性',
     backToTop: '返回顶部',
     favoritesValid: '当前收藏内容均有效。',
-    favoritesInvalid: '部分收藏内容指向的资源已失效，是否删除？'
+    favoritesInvalid: '部分收藏内容指向的资源已失效，是否删除？',
+    versionAndUpdates: '版本与更新',
+    softwareVersion: '软件版本',
+    autoUpdate: '自动更新',
+    helpAutoUpdate: '开启后，ClipAnchor 会在启动时静默检查 GitHub Releases，并在后台下载兼容安装包。不会在未确认时自动安装。',
+    updateQuietHint: '启动检查保持静默。只有兼容更新准备好，或下载失败但需要你选择时才提示。',
+    updateAttentionHint: '有更新需要处理。你可以立即安装，也可以保留提醒点稍后再处理。'
   }
 };
 

@@ -12,6 +12,35 @@
   <link rel="icon" type="image/png" sizes="128x128" href="assets/clipanchor-icon.png" />
   <link rel="shortcut icon" type="image/png" sizes="128x128" href="assets/clipanchor-icon.png" />
   <link rel="apple-touch-icon" sizes="128x128" href="assets/clipanchor-icon.png" />
+  <script>
+    (() => {
+      const storeKey = 'clipanchor-docs-lang';
+      const normalize = (value) => String(value || '').toLowerCase().replace('_', '-').startsWith('zh') ? 'zh' : 'en';
+      const readStoredLanguage = () => {
+        try {
+          return localStorage.getItem(storeKey);
+        } catch (_) {
+          return null;
+        }
+      };
+      const queryLang = new URLSearchParams(window.location.search).get('lang');
+      const locationProtocol = window.location.protocol || '';
+      const hostText = `${window.location.hostname || ''}`.toLowerCase();
+      const pathText = `${window.location.pathname || ''}`.toLowerCase();
+      const domainText = `${hostText}${pathText}`;
+      const domainLang = /(^|[.\/-])(zh|zh-cn|zh-hans|cn)([.\/-]|$)/.test(domainText) ? 'zh' : (/([.\/-])en([.\/-]|$)/.test(domainText) ? 'en' : '');
+      const storedLang = readStoredLanguage();
+      const browserLanguages = [...(navigator.languages || []), navigator.language, navigator.userLanguage].filter(Boolean);
+      const browserLang = normalize(browserLanguages[0] || 'en');
+      const initialLang = (queryLang ? normalize(queryLang) : '') || domainLang || storedLang || browserLang;
+      const state = { storeKey, queryLang, locationProtocol, hostText, pathText, domainText, domainLang, storedLang, browserLanguages, browserLang, systemLang: browserLang, initialLang, appliedLang: null };
+      // 在首屏渲染前保存唯一语言判定结果，后续正文翻译直接复用它，避免“head 判定为中文但底部脚本又回到英文”的双重判定问题。
+      // The first paint stores one canonical language decision, so the body translator reuses it instead of recomputing and drifting back to English.
+      window.__CLIPANCHOR_DOCS_LANGUAGE__ = state;
+      document.documentElement.lang = initialLang === 'zh' ? 'zh-CN' : 'en';
+      document.documentElement.dataset.lang = initialLang;
+    })();
+  </script>
   <title>ClipAnchor · Portable Clipboard Pinning</title>
   <style>
     :root {
@@ -389,7 +418,7 @@
         q1: 'Where is my data stored?', a1: 'All runtime data is stored under the app-local data folder, including clipanchor.db, settings, resources, exports, and logs.',
         q2: 'What happens at system startup?', a2: 'ClipAnchor starts in Lite mode by default. The main window stays hidden while tray, monitoring, and storage services keep running.',
         q3: 'Can I export history?', a3: 'Yes. JSON export keeps full data, and CSV export includes record metadata such as type, paths, timestamps, size, hash, and favorite state.',
-        q4: 'How do language and color mode work?', a4: 'The page follows your system language and color mode on first visit. Manual choices are remembered locally in your browser.',
+        q4: 'How do language and color mode work?', a4: 'Language-specific links and domains take priority, then the page uses your saved choice or browser system language. Manual choices are remembered locally in your browser.',
         footer: 'ClipAnchor · Portable clipboard pinning for modern desktops', darkMode: 'Dark mode', lightMode: 'Light mode'
       },
       zh: {
@@ -423,46 +452,121 @@
         q1: '我的数据存在哪里？', a1: '所有运行数据都保存在软件同级 data 文件夹，包括 clipanchor.db、设置、资源、导出文件和日志。',
         q2: '开机自启动时会发生什么？', a2: 'ClipAnchor 默认进入轻量模式。主窗口保持隐藏，托盘、监听和存储服务继续在后台运行。',
         q3: '可以导出历史记录吗？', a3: '可以。JSON 导出保留完整数据，CSV 导出包含类型、路径、时间、大小、哈希和收藏状态等记录属性。',
-        q4: '语言和深浅模式如何工作？', a4: '首次访问时网页会跟随系统语言和系统深浅模式。手动切换后，偏好会保存在浏览器本地。',
+        q4: '语言和深浅模式如何工作？', a4: '带语言标识的链接和网域优先生效，随后使用浏览器本地保存的选择或系统语言。手动切换后，偏好会保存在浏览器本地。',
         footer: 'ClipAnchor · 面向现代桌面的便携剪贴板置顶工具', darkMode: '深色模式', lightMode: '浅色模式'
       }
     };
 
     const languageStoreKey = 'clipanchor-docs-lang';
     const themeStoreKey = 'clipanchor-docs-theme';
-    const systemLanguage = (navigator.language || navigator.userLanguage || 'en').toLowerCase();
-    let currentLang = localStorage.getItem(languageStoreKey) || (systemLanguage.startsWith('zh') ? 'zh' : 'en');
+
+    function safeGetThemePreference() {
+      try {
+        return localStorage.getItem(themeStoreKey);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function safeSetThemePreference(value) {
+      try {
+        localStorage.setItem(themeStoreKey, value);
+      } catch (_) {
+        // 主题缓存失败不应阻塞语言初始化或下载面板渲染。
+        // Failing to cache the theme must not block language initialization or download rendering.
+      }
+    }
+
+    function normalizeDocsLanguage(value) {
+      return String(value || '').toLowerCase().replace('_', '-').startsWith('zh') ? 'zh' : 'en';
+    }
+
+    function safeGetStoredLanguage() {
+      try {
+        return localStorage.getItem(languageStoreKey);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function safeSetStoredLanguage(lang) {
+      try {
+        localStorage.setItem(languageStoreKey, lang);
+      } catch (_) {
+        // 静态文档在 file:// 或隐私模式中可能无法写入本地缓存；忽略该异常可以保证页面仍按当前语言正常渲染。
+        // Static docs may not be allowed to write local cache under file:// or private mode, so ignoring it keeps the current render language intact.
+      }
+    }
+
+    function detectDocsDomainLanguage() {
+      const queryLang = new URLSearchParams(window.location.search).get('lang');
+      if (queryLang) return normalizeDocsLanguage(queryLang);
+      const domainText = `${window.location.hostname || ''}${window.location.pathname || ''}`.toLowerCase();
+      if (/(^|[.\/-])(zh|zh-cn|zh-hans|cn)([.\/-]|$)/.test(domainText)) return 'zh';
+      if (/([.\/-])en([.\/-]|$)/.test(domainText)) return 'en';
+      return '';
+    }
+
+    function detectDocsSystemLanguage() {
+      const languages = [...(navigator.languages || []), navigator.language, navigator.userLanguage].filter(Boolean);
+      // 静态网页无法直接读取 macOS“系统设置”里的语言，只能读取浏览器暴露的语言列表；变量名使用 browser language 可以避免把浏览器偏好误认为系统偏好。
+      // A static page cannot directly read the macOS System Settings language, only the browser-exposed language list; naming this browser language avoids confusing browser preference with OS preference.
+      return normalizeDocsLanguage(languages[0] || 'en');
+    }
+
+    function resolveInitialDocsLanguage() {
+      const headState = window.__CLIPANCHOR_DOCS_LANGUAGE__;
+      if (headState && headState.initialLang) {
+        // 复用首屏脚本的判定结果，是为了让调试 JSON 中的 initialLang 与最终正文翻译完全一致。
+        // Reusing the first-paint decision keeps the debug JSON initialLang exactly aligned with the final translated body.
+        return normalizeDocsLanguage(headState.initialLang);
+      }
+      return detectDocsDomainLanguage() || safeGetStoredLanguage() || detectDocsSystemLanguage();
+    }
+
+    let currentLang = resolveInitialDocsLanguage();
     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)');
 
     function applyLanguage(lang, persist = true) {
-      currentLang = lang;
-      document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
-      document.documentElement.dataset.lang = lang;
-      if (persist) localStorage.setItem(languageStoreKey, lang);
-      const dict = translations[lang];
+      const normalizedLang = translations[lang] ? lang : 'en';
+      currentLang = normalizedLang;
+      document.documentElement.lang = normalizedLang === 'zh' ? 'zh-CN' : 'en';
+      document.documentElement.dataset.lang = normalizedLang;
+      if (persist) safeSetStoredLanguage(normalizedLang);
+      const dict = translations[normalizedLang] || translations.en;
       document.querySelectorAll('[data-i18n]').forEach((node) => {
         const key = node.getAttribute('data-i18n');
         if (dict[key]) node.textContent = dict[key];
       });
-      document.title = lang === 'zh' ? 'ClipAnchor（剪贴锚）· 便携剪贴板置顶工具' : 'ClipAnchor · Portable Clipboard Pinning';
-      document.querySelector('meta[name="description"]').setAttribute('content', lang === 'zh'
-        ? 'ClipAnchor（剪贴锚）是一款便携式剪贴板置顶工具，可将文本、图片和文件转为桌面弹窗，并提供本地历史、收藏、隐私过滤和数据管理。'
-        : 'ClipAnchor is a portable clipboard pinning tool that turns copied text, images, and files into desktop popups with local history, favorites, privacy filtering, and app-local data.');
+      if (window.__CLIPANCHOR_DOCS_LANGUAGE__) {
+        // 调试状态同步记录最终应用语言，是为了区分“检测正确但渲染未执行”和“检测本身选择了另一种语言”。
+        // The debug state records the final applied language so we can distinguish correct detection with failed rendering from a different detection decision.
+        window.__CLIPANCHOR_DOCS_LANGUAGE__.appliedLang = normalizedLang;
+      }
+      document.title = normalizedLang === 'zh' ? 'ClipAnchor（剪贴锚）· 便携剪贴板置顶工具' : 'ClipAnchor · Portable Clipboard Pinning';
+      const description = document.querySelector('meta[name="description"]');
+      if (description) {
+        description.setAttribute('content', normalizedLang === 'zh'
+          ? 'ClipAnchor（剪贴锚）是一款便携式剪贴板置顶工具，可将文本、图片和文件转为桌面弹窗，并提供本地历史、收藏、隐私过滤和数据管理。'
+          : 'ClipAnchor is a portable clipboard pinning tool that turns copied text, images, and files into desktop popups with local history, favorites, privacy filtering, and app-local data.');
+      }
       updateThemeButton();
     }
 
     function applyTheme(dark, persist = true) {
       document.documentElement.classList.toggle('dark', dark);
-      if (persist) localStorage.setItem(themeStoreKey, dark ? 'dark' : 'light');
+      if (persist) safeSetThemePreference(dark ? 'dark' : 'light');
       document.querySelector('meta[name="theme-color"]').setAttribute('content', dark ? '#08111f' : '#319FFF');
       updateThemeButton();
     }
 
     function updateThemeButton() {
-      const dict = translations[currentLang];
+      const dict = translations[currentLang] || translations.en;
       const isDark = document.documentElement.classList.contains('dark');
-      document.getElementById('themeIcon').textContent = isDark ? '☀' : '◐';
-      document.getElementById('themeButton').title = isDark ? dict.lightMode : dict.darkMode;
+      const themeIcon = document.getElementById('themeIcon');
+      const themeButton = document.getElementById('themeButton');
+      if (themeIcon) themeIcon.textContent = isDark ? '☀' : '◐';
+      if (themeButton) themeButton.title = isDark ? dict.lightMode : dict.darkMode;
     }
 
     const releaseApiUrl = 'https://api.github.com/repos/SELFEMO/ClipAnchor/releases';
@@ -534,7 +638,7 @@
         else if (lower.endsWith('.zip')) score += 42;
         else return -1;
         if (platform.language === 'zh-CN' && /zh-cn|zh_cn|cn/.test(lower)) score += 8;
-        if (platform.language === 'en-US' && /en-us|en_us|english|en/.test(lower)) score += 8;
+        if (platform.language === 'en-US' && /en-us|en_us|english|en\b/.test(lower)) score += 8;
       } else if (platform.os === 'macos') {
         if (!/macos|darwin|apple|osx/.test(lower)) return -1;
         if (lower.endsWith('.dmg')) score += 120;
@@ -635,18 +739,24 @@
       }
     }
 
-    document.getElementById('langButton').addEventListener('click', () => {
-      applyLanguage(currentLang === 'zh' ? 'en' : 'zh');
-      initializeDownloadPanel();
-    });
-    document.getElementById('themeButton').addEventListener('click', () => applyTheme(!document.documentElement.classList.contains('dark')));
-    prefersDark.addEventListener('change', (event) => {
-      if (!localStorage.getItem(themeStoreKey)) applyTheme(event.matches, false);
-    });
-
-    applyTheme(localStorage.getItem(themeStoreKey) ? localStorage.getItem(themeStoreKey) === 'dark' : prefersDark.matches, false);
+    applyTheme(safeGetThemePreference() ? safeGetThemePreference() === 'dark' : prefersDark.matches, false);
     applyLanguage(currentLang, false);
     initializeDownloadPanel();
+
+    const langButton = document.getElementById('langButton');
+    if (langButton) {
+      langButton.addEventListener('click', () => {
+        applyLanguage(currentLang === 'zh' ? 'en' : 'zh');
+        initializeDownloadPanel();
+      });
+    }
+    const themeButton = document.getElementById('themeButton');
+    if (themeButton) {
+      themeButton.addEventListener('click', () => applyTheme(!document.documentElement.classList.contains('dark')));
+    }
+    prefersDark.addEventListener('change', (event) => {
+      if (!safeGetThemePreference()) applyTheme(event.matches, false);
+    });
   </script>
 </body>
 </html>

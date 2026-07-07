@@ -8,6 +8,9 @@ pub fn should_start_in_lite_mode() -> bool {
 
 pub fn activate_main_window(app: &AppHandle) -> Result<(), String> {
     let window = app.get_webview_window("main").ok_or_else(|| "Main window not found".to_string())?;
+    // 主界面恢复时先还原普通应用策略，是为了让 macOS Dock 与 Cmd-Tab 再次显示主程序入口。
+    // Restoring the regular application policy before showing the main UI makes the macOS Dock and Cmd-Tab show the main app entry again.
+    crate::macos_native::show_dock_icon(app);
     // 先恢复窗口再请求焦点，是为了覆盖“隐藏到托盘”“最小化”和“自启动轻量模式”三种不同后台状态。
     // Restoring before focusing covers the three background states: hidden-to-tray, minimized, and startup Lite mode.
     window.show().map_err(|error| error.to_string())?;
@@ -26,6 +29,9 @@ pub fn hide_main_window(app: &AppHandle) -> Result<(), String> {
         // 统一隐藏入口，是为了让快捷键、托盘和窗口关闭都进入相同的后台轻量状态。
         // A single hide path keeps shortcuts, tray actions, and window closing in the same background Lite state.
         window.hide().map_err(|error| error.to_string())?;
+        // 主窗口隐藏后立即移除 Dock 图标，是为了让轻量模式真正表现为菜单栏/托盘后台工具而不是仍占 Dock。
+        // Removing the Dock icon right after hiding the main window makes Lite mode behave like a tray/menu-bar utility instead of occupying the Dock.
+        crate::macos_native::hide_dock_icon(app);
         let _ = app.emit("clipanchor-main-window-hidden", ());
     }
     Ok(())

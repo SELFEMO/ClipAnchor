@@ -1,9 +1,14 @@
+#![allow(unexpected_cfgs)]
+// objc 运行时桥接宏会展开旧的 cargo-clippy cfg；在 crate 根部收敛该依赖噪声，是为了让 macOS release 构建输出只保留真正需要处理的问题。
+// The Objective-C runtime bridge macros expand an old cargo-clippy cfg; containing that dependency noise at the crate root keeps macOS release output focused on actionable issues.
+
 mod app_log;
 mod autostart;
 mod clipboard_service;
 mod commands;
 mod database;
 mod models;
+mod macos_native;
 mod paths;
 mod popup;
 mod settings;
@@ -97,6 +102,7 @@ pub fn run() {
             get_update_status,
             check_update,
             install_downloaded_update,
+            dismiss_update_prompt,
             minimize_window,
             toggle_maximize_window,
             close_main_window,
@@ -136,7 +142,10 @@ pub fn run() {
                 Err(error) => log_startup_issue(&state, &format!("Settings lock unavailable during startup: {}", error)),
             }
             let lite_startup = window_control::should_start_in_lite_mode();
-            let _ = update_service::startup_background_check(&handle, &state.paths, lite_startup);
+            let auto_update_enabled = state.settings.lock().map(|settings| settings.auto_update_enabled).unwrap_or(true);
+            // 启动检查是否运行由设置控制，是为了让“自动更新”开关真正阻止后台网络请求。
+            // Startup checking is controlled by Settings so the Auto Update switch truly prevents background network requests.
+            let _ = update_service::startup_background_check(&handle, &state.paths, lite_startup, auto_update_enabled);
             if lite_startup {
                 // 自启动参数会保持主窗口隐藏，只留下托盘和后台监听，避免开机时打断用户桌面恢复流程。
                 // The startup flag keeps the main window hidden, leaving only tray and background monitoring so sign-in is not interrupted.

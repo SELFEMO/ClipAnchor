@@ -82,7 +82,7 @@ fn apply_macos(enabled: bool, root: &Path) -> Result<(), String> {
         let _ = std::fs::remove_file(plist);
         return Ok(());
     }
-    let exe = root.join("ClipAnchor.app/Contents/MacOS/ClipAnchor");
+    let exe = resolve_macos_executable(root);
     let content = format!(r#"<plist>
 <dict>
   <key>Label</key><string>com.clipanchor.desktop</string>
@@ -91,6 +91,21 @@ fn apply_macos(enabled: bool, root: &Path) -> Result<(), String> {
 </dict>
 </plist>"#, exe.to_string_lossy());
     std::fs::write(plist, content).map_err(|error| error.to_string())
+}
+
+
+#[cfg(target_os = "macos")]
+fn resolve_macos_executable(root: &Path) -> std::path::PathBuf {
+    if let Ok(exe) = std::env::current_exe() {
+        return exe;
+    }
+    let lowercase = root.join("ClipAnchor.app/Contents/MacOS/clipanchor");
+    if lowercase.exists() {
+        return lowercase;
+    }
+    // Tauri 打包名可能随 productName 或二进制名大小写变化，按实际存在路径回退是为了让 Apple Silicon .app 自启动不绑死单一文件名。
+    // Tauri bundle names may vary with productName or binary-name casing, so falling back by real paths keeps Apple Silicon .app autostart from depending on one filename.
+    root.join("ClipAnchor.app/Contents/MacOS/ClipAnchor")
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]

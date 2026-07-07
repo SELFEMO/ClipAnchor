@@ -1,11 +1,24 @@
 [package]
 name = "clipanchor"
-version = "0.3.3"
+version = "0.4.3"
 edition = "2021"
 publish = false
 license = "Apache-2.0"
 
 [package.metadata]
+
+[lints.rust]
+# objc 0.2 的宏内部仍引用 cargo-clippy feature cfg；全局允许该 lint 是为了清理 macOS 构建输出中的依赖噪声，而不是掩盖项目代码问题。
+# objc 0.2 macros still reference a cargo-clippy feature cfg internally; allowing this lint globally cleans dependency noise from macOS builds without hiding project-code issues.
+unexpected_cfgs = "allow"
+
+[features]
+# 透明窗口在 macOS 上由私有 API gate 控制；显式透传给 tauri 依赖，避免 tauri dev 的 --no-default-features 关闭后端方法。
+# Transparent windows on macOS are gated by the private API feature; forwarding it explicitly keeps the backend method available under tauri dev --no-default-features.
+macos-private-api = ["tauri/macos-private-api"]
+# objc 旧宏内部检查 feature="cargo-clippy"；声明空 feature 可以让新版 rustc 知道这是依赖宏的兼容分支，而不是项目误写配置。
+# Older objc macros check feature="cargo-clippy" internally; declaring an empty feature tells modern rustc this is a dependency compatibility branch, not a project cfg typo.
+cargo-clippy = []
 
 [lib]
 name = "clipanchor_lib"
@@ -15,7 +28,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
-tauri = { version = "2.11.5", features = ["tray-icon"] }
+tauri = { version = "2.11.5", features = ["tray-icon", "macos-private-api"] }
 tauri-plugin-shell = "2.3.5"
 tauri-plugin-opener = "2.5.4"
 tauri-plugin-dialog = "2.7.1"
@@ -34,3 +47,6 @@ raw-window-handle = "0.6"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Console", "Win32_System_DataExchange", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_System_Memory", "Win32_UI_Input_KeyboardAndMouse", "Win32_Globalization"] }
 winreg = "0.55"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc = "0.2"

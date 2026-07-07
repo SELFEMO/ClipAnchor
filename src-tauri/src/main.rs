@@ -38,7 +38,7 @@ fn main() {
     if should_print_version() {
         // 版本号只从 Cargo 元数据读取，是为了避免命令行输出、安装包版本和应用元数据出现多处维护导致的不一致。
         // The version is read only from Cargo metadata so CLI output, installer metadata, and app metadata cannot drift across duplicated sources.
-        print_cli_line(&format!("ClipAnchor {}", env!("CARGO_PKG_VERSION")));
+        print_cli_line(&format!("ClipAnchor v{}", env!("CARGO_PKG_VERSION")));
         return;
     }
 

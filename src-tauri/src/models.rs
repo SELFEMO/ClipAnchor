@@ -87,6 +87,7 @@ pub struct AppSettings {
     pub filter_text: bool,
     pub filter_image: bool,
     pub filter_file: bool,
+    pub auto_update_enabled: bool,
     pub shortcuts: ShortcutSettings,
 }
 
@@ -116,6 +117,7 @@ impl Default for AppSettings {
             filter_text: true,
             filter_image: true,
             filter_file: true,
+            auto_update_enabled: true,
             shortcuts: ShortcutSettings::default(),
         }
     }
@@ -178,6 +180,7 @@ impl Default for UpdateStatusPayload {
 pub struct BootstrapPayload {
     pub settings: AppSettings,
     pub paths: PathPayload,
+    pub app_version: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

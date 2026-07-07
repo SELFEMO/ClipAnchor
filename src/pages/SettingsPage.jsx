@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Clock3, Database, Download, FolderOpen, HelpCircle, Keyboard, MapPinned, Minus, Palette, Plus, Power, RotateCcw, Trash2, Upload } from 'lucide-react';
+import { BadgeCheck, Clock3, Database, Download, FolderOpen, HelpCircle, Keyboard, MapPinned, Minus, Palette, Plus, Power, RefreshCw, RotateCcw, Trash2, Upload } from 'lucide-react';
 import { api } from '../api.js';
+import { captureShortcutValue, formatShortcutForDisplay, normalizeShortcutForStorage } from '../shortcutDisplay.js';
 
 function Switch({ checked, onChange }) {
   return <button className={`switch ${checked ? 'on' : ''}`} onClick={() => onChange(!checked)}><span /></button>;
@@ -8,14 +9,8 @@ function Switch({ checked, onChange }) {
 
 function captureShortcut(event, setter) {
   event.preventDefault();
-  const parts = [];
-  if (event.ctrlKey) parts.push('Ctrl');
-  if (event.metaKey) parts.push('Meta');
-  if (event.altKey) parts.push('Alt');
-  if (event.shiftKey) parts.push('Shift');
-  const key = event.key.length === 1 ? event.key.toUpperCase() : event.key;
-  if (!['Control', 'Shift', 'Alt', 'Meta'].includes(key)) parts.push(key);
-  setter(parts.join('+'));
+  const shortcut = captureShortcutValue(event);
+  if (shortcut) setter(shortcut);
 }
 
 function Segmented({ value, options, onChange }) {
@@ -174,6 +169,7 @@ function normalizeSettings(value) {
   // Older settings.json files may miss new fields; the frontend fills defaults so upgraded settings pages do not lose controls because of historical config files.
   return {
     ...value,
+    auto_update_enabled: value?.auto_update_enabled !== false,
     log_retention_days: Number(value?.log_retention_days || 7),
     shortcuts: {
       ...defaultShortcuts,
@@ -206,7 +202,7 @@ function SettingsSoftDialog({ dialog, t, onClose }) {
   );
 }
 
-export default function SettingsPage({ t, boot, onBootChange }) {
+export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCheckUpdate }) {
   const [settings, setSettings] = useState(() => normalizeSettings(boot.settings));
   const [dataUsage, setDataUsage] = useState(null);
   const [logStatus, setLogStatus] = useState(null);
@@ -227,7 +223,7 @@ export default function SettingsPage({ t, boot, onBootChange }) {
   }, [boot.paths.data]);
 
   const conflicts = useMemo(() => {
-    const values = Object.values(settings.shortcuts || {});
+    const values = Object.values(settings.shortcuts || {}).map(normalizeShortcutForStorage);
     return new Set(values.filter((value, index) => values.indexOf(value) !== index));
   }, [settings.shortcuts]);
 
@@ -404,10 +400,11 @@ export default function SettingsPage({ t, boot, onBootChange }) {
           <div className="shortcut-grid">
             {shortcutOrder.map((key) => {
               const value = settings.shortcuts?.[key] || defaultShortcuts[key];
+              const normalizedValue = normalizeShortcutForStorage(value);
               return (
                 <label key={key}>
                   <SettingName>{t(shortcutLabels[key] || key)}</SettingName>
-                  <input className={conflicts.has(value) ? 'conflict' : ''} value={value} onKeyDown={(e) => captureShortcut(e, (v) => updateShortcuts(key, v))} onChange={() => {}} />
+                  <input className={conflicts.has(normalizedValue) ? 'conflict' : ''} value={formatShortcutForDisplay(value)} onKeyDown={(e) => captureShortcut(e, (v) => updateShortcuts(key, v))} onChange={() => {}} />
                 </label>
               );
             })}
@@ -480,6 +477,23 @@ export default function SettingsPage({ t, boot, onBootChange }) {
               <button className="soft-button" onClick={refreshUsage}><RotateCcw size={16} /> {t('refreshLogs')}</button>
               <button className="soft-button danger-line" onClick={clearLogFiles}><Trash2 size={16} /> {t('clearLogs')}</button>
             </div>
+          </div>
+        </div>
+
+
+        <div className="settings-card wide version-card">
+          <h2><BadgeCheck size={18} /> {t('versionAndUpdates')}</h2>
+          <div className="version-update-panel">
+            <div className="version-copy-block">
+              <span>{t('softwareVersion')}</span>
+              <strong>ClipAnchor v{boot.app_version || updateStatus?.current_version || ''}</strong>
+              <p>{updateStatus?.attention_required ? t('updateAttentionHint') : t('updateQuietHint')}</p>
+            </div>
+            <label className="setting-row version-auto-row"><SettingName help={t('helpAutoUpdate')}>{t('autoUpdate')}</SettingName><Switch checked={settings.auto_update_enabled !== false} onChange={(v) => update({ auto_update_enabled: v })} /></label>
+            <button className={`soft-button version-check-button ${updateStatus?.attention_required ? 'has-update-attention' : ''}`} onClick={onCheckUpdate}>
+              <RefreshCw size={16} /> {t('checkUpdate')}
+              {updateStatus?.attention_required ? <span className="update-attention-dot" aria-hidden="true" /> : null}
+            </button>
           </div>
         </div>
       </div>

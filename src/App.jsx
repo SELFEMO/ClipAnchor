@@ -5,6 +5,7 @@ import { Activity, CheckCircle2, ClipboardList, Download, Info, Loader2, LogOut,
 import { api } from './api.js';
 import { createTranslator } from './i18n.js';
 import { resolveThemeClass, useDocumentThemeSync, useSystemThemePreference } from './theme.js';
+import { shortcutDisplayTokens } from './shortcutDisplay.js';
 import ClipboardPage from './pages/ClipboardPage.jsx';
 import SettingsPage from './pages/SettingsPage.jsx';
 import PopupWindow from './popup/PopupWindow.jsx';
@@ -289,6 +290,18 @@ export default function App() {
     }
   }
 
+  async function dismissUpdateDialog() {
+    setUpdateDialogOpen(false);
+    try {
+      // 关闭更新弹窗时同步清除后端提示位，是为了避免同一条检查结果在下一次打开主界面时再次弹出。
+      // Closing the update dialog also clears the backend prompt flag so the same check result does not pop up again on the next main-window open.
+      const status = await api.dismissUpdatePrompt();
+      setUpdateStatus(status);
+    } catch (error) {
+      console.error('ClipAnchor update prompt dismiss failed:', error);
+    }
+  }
+
   async function installUpdate() {
     // 安装按钮只调用后端统一入口，是为了避免前端按平台拼接安装命令导致 Windows、macOS、Linux 行为分叉。
     // The install button calls one backend entry so the frontend does not duplicate platform-specific installer commands.
@@ -313,6 +326,9 @@ export default function App() {
   const pageSubtitle = tab === 'favorites' ? t('favoritesSubtitle') : (tab === 'clipboard' ? t('clipboardSubtitle') : t('settingsSubtitle'));
   const privacyMode = boot.settings.privacy_filter_mode || (boot.settings.privacy_mode ? 'light' : 'off');
   const privacyStatus = privacyMode === 'off' ? t('privacyOff') : `${t('privacyOn')} · ${privacyMode === 'smart' ? t('privacySmartMode') : t('privacyLightMode')}`;
+  // 侧边栏快捷键徽标使用平台化显示，是为了避免 macOS 用户看到 Windows 式 Ctrl 命名而误按 Command。
+  // The sidebar shortcut badge uses platform-aware labels so macOS users do not mistake Windows-style Ctrl naming for Command.
+  const pinServiceShortcutTokens = shortcutDisplayTokens(boot.settings.shortcuts?.toggle_pin_service || 'Ctrl+Shift+P');
 
   return (
     <main className={`app-shell codex-shell ${themeClass} ${motionClass}`} style={{ '--ui-scale': uiScale }}>
@@ -352,7 +368,7 @@ export default function App() {
           </nav>
 
           <div className="sidebar-footer">
-            <div className="shortcut-hint"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>P</kbd><span>{t('pinService')}</span></div>
+            <div className="shortcut-hint">{pinServiceShortcutTokens.map((token) => <kbd key={token}>{token}</kbd>)}<span>{t('pinService')}</span></div>
             <div className="sidebar-action-row sidebar-action-row-split">
               <div className="sidebar-left-actions">
               <button className="square-icon-button" onClick={toggleTheme} title={isDark ? t('light') : t('dark')} aria-label={isDark ? t('light') : t('dark')}>
@@ -385,12 +401,12 @@ export default function App() {
             ) : tab === 'favorites' ? (
               <ClipboardPage t={t} settings={boot.settings} refreshKey={refreshKey} mode="favorites" />
             ) : (
-              <SettingsPage t={t} boot={boot} onBootChange={setBoot} />
+              <SettingsPage t={t} boot={boot} onBootChange={setBoot} updateStatus={updateStatus} onCheckUpdate={checkUpdate} />
             )}
           </div>
         </section>
       </section>
-      {updateDialogOpen ? <UpdateStatusDialog t={t} status={updateStatus} onClose={() => setUpdateDialogOpen(false)} onInstall={installUpdate} /> : null}
+      {updateDialogOpen ? <UpdateStatusDialog t={t} status={updateStatus} onClose={dismissUpdateDialog} onInstall={installUpdate} /> : null}
     </main>
   );
 }

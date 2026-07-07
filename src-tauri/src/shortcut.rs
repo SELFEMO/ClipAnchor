@@ -1,4 +1,5 @@
 use crate::{app_log, models::ShortcutSettings, settings};
+#[cfg(target_os = "windows")]
 use std::{collections::HashSet, sync::OnceLock, thread, time::Duration};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
@@ -143,21 +144,54 @@ fn shortcut_matches(configured: &str, pressed: &Shortcut) -> bool {
 }
 
 fn parse_shortcut(value: &str) -> Result<Shortcut, String> {
-    let trimmed = value.trim();
-    let mut candidates = vec![trimmed.to_string()];
-    if trimmed.contains("Ctrl") {
-        candidates.push(trimmed.replace("Ctrl", "Control"));
-        candidates.push(trimmed.replace("Ctrl", "CommandOrControl"));
+    // 后端先归一化不同平台的键名，是为了让前端显示 Control/Option/Command 后仍能注册为同一个真实快捷键。
+    // The backend normalizes platform-specific key names first so shortcuts displayed as Control/Option/Command still register as the same real accelerator.
+    let canonical = canonical_shortcut_string(value);
+    let mut candidates = vec![canonical.clone()];
+    if canonical.contains("Ctrl") {
+        candidates.push(canonical.replace("Ctrl", "Control"));
+        candidates.push(canonical.replace("Ctrl", "CommandOrControl"));
     }
-    if trimmed.contains("Control") {
-        candidates.push(trimmed.replace("Control", "Ctrl"));
+    if canonical.contains("Meta") {
+        candidates.push(canonical.replace("Meta", "Command"));
+        candidates.push(canonical.replace("Meta", "Super"));
+        candidates.push(canonical.replace("Meta", "Cmd"));
     }
+    if canonical.contains("Alt") {
+        candidates.push(canonical.replace("Alt", "Option"));
+    }
+    candidates.dedup();
     for candidate in candidates {
         if let Ok(shortcut) = Shortcut::try_from(candidate.as_str()) {
             return Ok(shortcut);
         }
     }
     Err("invalid shortcut format".into())
+}
+
+fn canonical_shortcut_string(value: &str) -> String {
+    value
+        .split('+')
+        .map(|token| canonical_shortcut_token(token.trim()))
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>()
+        .join("+")
+}
+
+fn canonical_shortcut_token(token: &str) -> String {
+    let lower = token.to_ascii_lowercase();
+    match lower.as_str() {
+        "ctrl" | "control" => "Ctrl".into(),
+        "shift" => "Shift".into(),
+        "alt" | "option" => "Alt".into(),
+        "meta" | "command" | "cmd" | "super" | "win" | "windows" => "Meta".into(),
+        "escape" => "Esc".into(),
+        "arrowup" => "Up".into(),
+        "arrowdown" => "Down".into(),
+        "arrowleft" => "Left".into(),
+        "arrowright" => "Right".into(),
+        _ => token.to_string(),
+    }
 }
 
 #[cfg(target_os = "windows")]

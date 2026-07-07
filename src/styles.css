@@ -19,10 +19,11 @@
   --shadow: rgba(0, 0, 0, .36);
   --scroll-thumb: rgba(49, 159, 255, .58);
   --mono: "SFMono-Regular", "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+  --window-radius: 24px;
 }
 
 * { box-sizing: border-box; }
-html, body, #root { width: 100%; min-height: 100%; }
+html, body, #root { width: 100%; height: 100%; min-height: 100%; overflow: hidden; background: transparent; }
 body {
   margin: 0;
   min-height: 100vh;
@@ -69,10 +70,15 @@ kbd {
   color-scheme: light;
 }
 
+/* 透明原生窗口必须由应用壳层承接最外层圆角，否则 WebView 仍会绘制整块直角画布。 */
+/* Transparent native windows need the app shell itself to own the outer radius; otherwise the WebView still paints a square surface. */
 .app-shell {
   min-height: 100vh;
+  height: 100vh;
   padding: 18px;
   overflow: hidden;
+  border-radius: var(--window-radius);
+  clip-path: inset(0 round var(--window-radius));
   background:
     radial-gradient(circle at 12% 0%, rgba(49, 159, 255, .16), transparent 34%),
     radial-gradient(circle at 88% 12%, rgba(244, 169, 170, .10), transparent 28%),
@@ -5049,4 +5055,88 @@ h1 {
   border-color: color-mix(in srgb, #319FFF 38%, var(--line));
   background: color-mix(in srgb, var(--surface-hover) 88%, transparent);
   transform: translateY(-1px);
+}
+
+/* 版本与更新入口放在设置页末尾，是为了让自动更新、手动检查和当前版本形成一个明确的收口区域。 */
+/* The version and update entry stays at the end of Settings so auto update, manual checks, and the current version form one clear closing section. */
+.version-card {
+  grid-column: 1 / -1;
+}
+
+.version-update-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, auto) auto;
+  align-items: stretch;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--panel) 84%, transparent);
+}
+
+.version-copy-block {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  align-content: center;
+}
+
+.version-copy-block span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.version-copy-block strong {
+  color: var(--text-strong);
+  font-family: var(--mono);
+  font-size: 18px;
+  letter-spacing: -.02em;
+}
+
+.version-copy-block p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.version-auto-row {
+  display: grid !important;
+  grid-template-columns: minmax(130px, auto) auto !important;
+  align-items: center !important;
+  gap: 12px !important;
+  min-height: 58px !important;
+  margin: 0 !important;
+}
+
+.version-check-button {
+  position: relative;
+  min-height: 58px;
+  padding: 0 16px;
+  white-space: nowrap;
+}
+
+.version-check-button .update-attention-dot {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--coral);
+  box-shadow: 0 0 0 2px var(--surface), 0 0 12px color-mix(in srgb, var(--coral) 55%, transparent);
+}
+
+@media (max-width: 980px) {
+  .version-update-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .version-auto-row,
+  .version-check-button {
+    width: 100%;
+  }
 }

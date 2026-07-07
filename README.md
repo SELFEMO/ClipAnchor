@@ -15,16 +15,16 @@ This project was implemented with AI-assisted programming. Before public release
 
 ## Current Verification Status
 
-| Platform      | Current Status | Notes |
-| ------------- | -------------- | ----- |
-| Windows x64   | Verified       | Current Windows x64 smoke testing covers desktop startup, tray restore, single-instance activation, settings persistence, clipboard capture/history, manual update checking, GitHub Release downgrade-test detection and package download, old update package cleanup before a new check, hidden background update downloader without command-window flashes, and `--version`. A close-to-tray monitor fix and watchdog have been added for long idle sessions. Before public distribution, repeat long-duration background testing, startup Lite-mode update testing, installer signing, localized MSI UI, and release-side asset publishing verification. |
-| Windows ARM64 | Unverified     | Native ARM64 packaging and runtime behavior have not been validated yet. Before release, verify startup, tray, autostart, global shortcuts, clipboard access, and update asset matching on real Windows ARM64 hardware. |
-| macOS ARM64   | Unverified     | Build and runtime verification on Apple Silicon are still pending. Before release, validate the APP/DMG bundle, code signing/notarization, clipboard permissions, tray/menu behavior, autostart plist, and update handoff. |
-| macOS x64     | Unverified     | Intel macOS packaging and runtime verification are still pending. Before release, validate the same APP/DMG, signing/notarization, permissions, tray/menu, autostart, and update flow on Intel hardware or a reliable Intel environment. |
-| Linux x64     | Unverified     | DEB/RPM installation and runtime behavior have not been validated across desktop environments. Before release, test desktop entry creation, tray support, autostart, global shortcuts, X11/Wayland clipboard behavior, and DEB/RPM update selection. |
-| Linux ARM64   | Unverified     | Native ARM64 Linux packaging and runtime behavior are still pending. Before release, test DEB/RPM packaging, desktop integration, tray availability, clipboard access, and update asset matching on real ARM64 hardware. |
+| Platform      | Status | Notes |
+| ------------- | ------ | ----- |
+| Windows x64   | Verified | Basic desktop, tray, clipboard, history, update, and CLI smoke tests passed. |
+| Windows ARM64 | Pending | Needs real-device package and runtime verification. |
+| macOS ARM64   | Verified | Apple Silicon APP/DMG runtime smoke tests passed. |
+| macOS x64     | Pending | Needs Intel macOS package and runtime verification. |
+| Linux x64     | Pending | Needs DEB/RPM package and desktop-environment verification. |
+| Linux ARM64   | Pending | Needs ARM64 Linux package and runtime verification. |
 
-The status above is a practical packaging and runtime checklist, not a security audit or long-term stability guarantee. **Verified** means the listed platform has passed the current smoke-test scope; **Unverified** means the code is intended to support the platform but still needs a real-device packaging and runtime pass before release. Long-duration background monitoring and release installer handoff should be re-tested after every update to clipboard polling, Lite mode, autostart, installer packaging, signing, or the GitHub Release pipeline.
+This table is a compact release checklist. Re-test long-running background behavior, autostart Lite mode, installer handoff, and update delivery before publishing a new build.
 
 ClipAnchor is designed to stay portable and quiet. Runtime data is stored beside the application under `data/`, which makes backup and migration straightforward. When launched at system startup, ClipAnchor enters Lite mode by default: no main window is shown, while the tray icon, clipboard monitor, and database service keep running silently.
 
@@ -60,11 +60,13 @@ ClipAnchor is designed to stay portable and quiet. Runtime data is stored beside
 ### Development
 
 ```bash
+git clone https://github.com/SELFEMO/ClipAnchor.git
+cd ClipAnchor
 npm install --registry=https://registry.npmmirror.com
 npm run desktop:dev
 ```
 
-On Windows, install Rust, Node.js, Microsoft Visual Studio Build Tools, and WebView2 Runtime before development. The project includes `.cargo/config.toml`, so Cargo uses a sparse mirror by default, which helps in networks where crates.io is unstable.
+Run `npm install` and `npm run desktop:dev` inside the cloned `ClipAnchor` directory. The command fails with `Could not read package.json` if it is executed from the parent folder. Use `npm run clean` when a clean rebuild is needed; it replaces shell-specific `rm -rf` cleanup and avoids intermittent `Directory not empty` failures on macOS. On Windows, install Rust, Node.js, Microsoft Visual Studio Build Tools, and WebView2 Runtime before development. The project includes `.cargo/config.toml`, so Cargo uses a sparse mirror by default, which helps in networks where crates.io is unstable.
 
 
 ### Check installed version
@@ -82,9 +84,16 @@ On macOS and Linux, use the same flags with the installed `clipanchor` binary. T
 npm run desktop:build
 ```
 
-Tauri writes installers to `src-tauri/target/release/bundle/`. The project scripts copy distributable artifacts into the root `release/` folder for easier publishing.
+For Apple Silicon on a macOS host, add the target once and build the ARM64 bundle:
 
-Linux targets are DEB and RPM. Windows targets include NSIS and MSI installers. macOS targets include APP and DMG.
+```bash
+rustup target add aarch64-apple-darwin
+npm run desktop:build:macos-arm64
+```
+
+Tauri writes installers to `src-tauri/target/release/bundle/` or `src-tauri/target/<target-triple>/release/bundle/` for target-specific builds. The project scripts copy distributable artifacts into the root `release/` folder for easier publishing.
+
+Linux targets are DEB and RPM. Windows targets include NSIS and MSI installers. macOS targets include APP and DMG. macOS DMG creation should be run on macOS, then signed and notarized with your own Apple Developer certificate before public distribution.
 
 ## Basic usage
 
@@ -116,9 +125,9 @@ Move the whole project or installation folder to migrate history and settings to
 
 ## Update channel
 
-ClipAnchor checks GitHub Releases in the background at startup and keeps the process silent while the main window is closed. The manual **Check update** button opens an in-app status card immediately, then shows checking, downloading, ready-to-install, no-update, incompatible-asset, or failure states. Release tags should use `pre-release-v...` or `release-v...`.
+ClipAnchor can silently check GitHub Releases at startup when **Auto update** is enabled in Settings. Startup checks do not open the update card for checking, no-update, generic failures, or releases that do not contain a compatible package. The foreground prompt appears only when an update is actionable, such as a compatible package is ready to install, or a compatible package exists but automatic download failed and the user must choose whether to open the release asset.
 
-Asset selection is automatic: Windows prefers `ClipAnchor_Windows_x64.exe`; if no EXE exists, it chooses a localized MSI such as `ClipAnchor_Windows_x64_zh-CN.msi` or `ClipAnchor_Windows_x64_en-US.msi`. macOS uses DMG, while Linux selects DEB or RPM according to the distribution family. Before each new check, old packages in `data/updates/` are removed so stale installers cannot be reused accidentally. Newly downloaded packages are stored in `data/updates/` and opened through the system installer when the user chooses **Install now**. A normal manual launch checks in the background and opens the update card if a new version is found; startup Lite mode keeps the check and download silent until the user opens the main window.
+The manual **Check update** button always opens an in-app status card immediately, then shows checking, downloading, ready-to-install, no-update, incompatible-asset, or failure states. Release tags should use `pre-release-v...` or `release-v...`. Asset selection is automatic: Windows prefers `ClipAnchor_Windows_x64.exe`; if no EXE exists, it chooses a localized MSI such as `ClipAnchor_Windows_x64_zh-CN.msi` or `ClipAnchor_Windows_x64_en-US.msi`. macOS uses DMG and now filters architecture-specific names so Apple Silicon selects ARM64 or universal packages instead of Intel-only packages. Linux selects DEB or RPM according to the distribution family. Before each new check, old packages in `data/updates/` are removed so stale installers cannot be reused accidentally. Newly downloaded packages are stored in `data/updates/` and opened through the system installer when the user chooses **Install now**.
 
 ## Release artifact names
 

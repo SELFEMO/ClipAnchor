@@ -2,13 +2,38 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const root = process.cwd();
-const bundleRoot = path.join(root, 'src-tauri', 'target', 'release', 'bundle');
 const releaseDir = path.join(root, 'release');
-const platformMap = { win32: 'windows', darwin: 'macos', linux: 'linux' };
+const platformMap = { win32: 'Windows', darwin: 'macOS', linux: 'Linux' };
 const archMap = { x64: 'x64', arm64: 'arm64', ia32: 'x86' };
-const platform = platformMap[process.platform] || process.platform;
-const arch = archMap[process.arch] || process.arch;
+const targetTriple = readTargetTriple();
+const platform = targetTriple ? platformFromTriple(targetTriple) : (platformMap[process.platform] || process.platform);
+const arch = targetTriple ? archFromTriple(targetTriple) : (archMap[process.arch] || process.arch);
+const bundleRoot = targetTriple
+  ? path.join(root, 'src-tauri', 'target', targetTriple, 'release', 'bundle')
+  : path.join(root, 'src-tauri', 'target', 'release', 'bundle');
 const wanted = new Set(['.exe', '.msi', '.dmg', '.deb', '.rpm']);
+
+function readTargetTriple() {
+  const targetIndex = process.argv.indexOf('--target');
+  if (targetIndex >= 0 && process.argv[targetIndex + 1]) return process.argv[targetIndex + 1];
+  return process.env.TAURI_TARGET_TRIPLE || process.env.CARGO_BUILD_TARGET || '';
+}
+
+function platformFromTriple(triple) {
+  const value = triple.toLowerCase();
+  if (value.includes('apple-darwin')) return 'macOS';
+  if (value.includes('windows')) return 'Windows';
+  if (value.includes('linux')) return 'Linux';
+  return platformMap[process.platform] || process.platform;
+}
+
+function archFromTriple(triple) {
+  const value = triple.toLowerCase();
+  if (value.startsWith('aarch64') || value.startsWith('arm64')) return 'arm64';
+  if (value.startsWith('x86_64') || value.startsWith('amd64')) return 'x64';
+  if (value.startsWith('i686') || value.startsWith('i386')) return 'x86';
+  return archMap[process.arch] || process.arch;
+}
 
 function walk(dir) {
   if (!fs.existsSync(dir)) return [];
@@ -47,8 +72,8 @@ if (!artifacts.length) {
 
 for (const artifact of artifacts) {
   const ext = path.extname(artifact);
-  // 中文：WiX 会为每种语言生成独立 MSI，因此复制到 release 时保留语言后缀，避免中英文安装包互相覆盖。
-  // English: WiX emits one MSI per language, so we preserve the language suffix in release to avoid overwriting localized installers.
+  // 中文：交叉构建会把产物写入 target/<triple>/release/bundle，因此命名必须优先使用目标 triple 而不是当前机器架构。
+  // English: Cross builds write artifacts under target/<triple>/release/bundle, so naming must prefer the target triple rather than the host architecture.
   const suffix = ext.toLowerCase() === '.msi' ? languageSuffix(artifact) : '';
   const target = path.join(releaseDir, `ClipAnchor_${platform}_${arch}${suffix}${ext}`);
   fs.copyFileSync(artifact, target);
