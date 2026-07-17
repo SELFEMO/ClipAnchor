@@ -1,533 +1,157 @@
-const messages = {
-  en: {
-    clipboard: 'Clipboard',
-    settings: 'Settings',
-    favoritesNav: 'Favorites',
-    favoritesEyebrow: 'Saved clips',
-    favoritesTitle: 'Saved clips',
-    favoritesSubtitle: 'Review and manage clips you marked as important. You can edit text, copy content, refresh resource validity, or turn a saved item into a pinned desktop popup.',
-    portableNative: 'portable native',
-    clipboardEyebrow: 'Productive clipboard',
-    historyEyebrow: 'History workspace',
-    settingsEyebrow: 'Control center',
-    clipboardTitle: 'Command your clipboard.',
-    clipboardSubtitle: 'A developer-grade command center for text, images, and files. Keep useful clips as pinned records, then launch them as desktop popups when you need context beside your work.',
-    settingsTitle: 'Configure the runtime.',
-    settingsSubtitle: 'Control services, shortcuts, storage, privacy, and popup placement from one compact operations panel.',
-    pinRunning: 'Pin service running',
-    pinPaused: 'Pin service paused',
-    privacyOn: 'Sensitive filter on',
-    privacyOff: 'Sensitive filter off',
-    search: 'Search text, files, images...',
-    all: 'All',
-    favorite: 'Favorites',
-    favorites: 'Favorites',
-    recent: 'Recent',
-    text: 'Text',
-    image: 'Image',
-    file: 'File',
-    mixed: 'Mixed',
-    copy: 'Copy',
-    delete: 'Delete',
-    deleteOne: 'Delete this record',
-    confirmDeleteOne: 'Delete this history record?',
-    ok: 'OK',
-    invalidTitle: 'Invalid content',
-    textRecordEmptyTitle: 'Empty text',
-    confirmDeleteOneTitle: 'Delete record',
-    confirmDeleteFavoriteTitle: 'Delete favorite record',
-    confirmDeleteFavorite: 'This record is favorited. Delete it anyway? This will also remove it from Favorites.',
-    confirmDeleteSelectedTitle: 'Delete selected records',
-    confirmDeleteSelected: 'Delete the selected history records?',
-    confirmDeleteSelectedFavoriteTitle: 'Delete selected favorite records',
-    confirmDeleteSelectedFavorite: 'Some selected records are favorites. Delete all selected records anyway?',
-    favoritesValidTitle: 'Favorites checked',
-    favoritesInvalidTitle: 'Invalid favorites',
-    clear: 'Clear history',
-    clearNonPinned: 'Clear non-favorites',
-    clearIncludingPinned: 'Force clear all',
-    confirmClearNonPinned: 'Clear all non-favorite history records? Favorite records will be kept.',
-    confirmForceClear: 'Force clear all history records, including favorites? This cannot be undone.',
-    clearDone: 'History cleared.',
-    deleteBeforeDays: 'Delete records older than days',
-    deleteBeforeDaysAction: 'Delete older than {days}d',
-    preserveFavorites: 'Keep favorites',
-    helpDeleteBeforeDays: 'Deletes history records created before the selected number of days. Favorites are kept when the switch is on.',
-    confirmDeleteBeforeDays: 'Delete history records older than {days} day(s)?',
-    deleteBeforeDaysDone: 'Deleted {count} old record(s).',
-    cleanupDaysInvalid: 'Enter a number greater than zero.',
-    pinnedProtected: 'Favorite records are protected. Unfavorite them before deleting.',
-    invalid: 'This content is invalid. Delete this record?',
-    empty: 'No history yet. Enable history service and copy something.',
-    itemCount: 'items',
-    selected: 'selected',
-    protectedCount: 'protected',
-    totalBytes: 'stored locally',
-    quickPin: 'Pin as popup',
-    addText: 'Add text',
-    addTextRecord: 'Add text record',
-    editText: 'Edit text',
-    editTextRecord: 'Edit text record',
-    manualTextEyebrow: 'Manual clip',
-    editTextEyebrow: 'Text history',
-    textRecordPlaceholder: 'Type the text you want to keep in ClipAnchor history...',
-    textRecordEmpty: 'Text cannot be empty.',
-    save: 'Save',
-    cancel: 'Cancel',
-    confirm: 'Confirm',
-    close: 'Close',
-    minimize: 'Minimize',
-    maximize: 'Maximize',
-    clipboardBoardTitle: 'Clipboard board',
-    basic: 'Basic',
-    appearance: 'Appearance',
-    appearanceHint: '',
-    runtime: 'Runtime behavior',
-    sizingAndTiming: 'Sizing and timing',
-    runtimeHint: '',
-    shortcuts: 'Shortcuts',
-    position: 'Popup position',
-    data: 'Data management',
-    pinService: 'Pin service',
-    historyService: 'History service',
-    privacyMode: 'Sensitive filter',
-    privacyOffMode: 'Off',
-    privacyLightMode: 'Light',
-    privacySmartMode: 'Smart',
-    privacySmartTitle: 'Smart filtering is not ready',
-    privacySmartUnavailable: 'Smart filtering is not enabled yet. ClipAnchor will keep using the lightweight filter so clipboard capture stays fast.',
-    ok: 'OK',
-    helpPinService: 'When enabled, new clipboard content can become a desktop popup card.',
-    helpHistoryService: 'When enabled, copied content is saved to the local SQLite history database.',
-    helpPrivacy: 'Privacy mode scans copied text and filenames for likely passwords, tokens, keys, card numbers, credentials, or private screenshots, then skips those items from history and popups. Existing history remains unchanged.',
-    helpAutoStart: 'Starts ClipAnchor automatically when you sign in to the operating system.',
-    macosLoginItemError: 'Failed to add ClipAnchor to macOS Open at Login. Open System Settings > Privacy & Security > Automation, allow ClipAnchor to control System Events, then turn Launch at startup off and on again. Detail: {detail}',
-    unknownError: 'Unknown error',
-    helpAutoHide: 'Hides popup action buttons until the mouse enters the popup.',
-    helpAutoDestroy: 'Unpinned popups close automatically after this delay when there is no interaction.',
-    helpLiteDelay: 'After this idle time, ClipAnchor can reduce visible UI work and keep background services running.',
-    helpUiScale: 'Adjusts interface text and component density in 5% steps without zooming the whole window.',
-    helpLanguage: 'Auto follows the system language; manual choices override it.',
-    helpTheme: 'System follows OS color mode; Dark and Light are fixed choices.',
-    helpAnimation: 'Elegant adds subtle motion; Performance keeps transitions minimal.',
-    helpPopupWidth: 'Sets the default width for newly created desktop popups.',
-    helpPopupHeight: 'Sets the default height for newly created desktop popups.',
-    helpPosition: 'Drag the mini popup on the map to set where new popups appear by default.',
-    helpClearNonPinned: 'Deletes normal history records while keeping favorite records.',
-    helpForceClear: 'Deletes every history record, including favorites.',
-    autoStart: 'Launch at startup',
-    autoHide: 'Auto-hide popup actions',
-    autoDestroy: 'Auto-destroy delay',
-    liteDelay: 'Lite mode delay',
-    lightDelay: 'Lite mode delay',
-    scale: 'UI scale',
-    language: 'Language',
-    autoLanguage: 'Auto',
-    theme: 'Theme',
-    animation: 'Animation mode',
-    elegant: 'Elegant',
-    performance: 'Performance',
-    system: 'System',
-    dark: 'Dark',
-    light: 'Light',
-    small: 'Small',
-    medium: 'Medium',
-    large: 'Large',
-    popupSize: 'Popup size',
-    popupSizeHint: '',
-    popupWidth: 'Width',
-    popupHeight: 'Height',
-    adjust: 'Adjust popup position',
-    export: 'Export history',
-    import: 'Import history',
-    exportJson: 'Export JSON',
-    exportCsv: 'Export CSV',
-    importJson: 'Import JSON',
-    importCsv: 'Import CSV',
-    dbPath: 'Database path',
-    logManagement: 'Log management',
-    logManagementTitle: 'Runtime diagnostic logs',
-    logManagementHint: 'ClipAnchor rotates the current log after it reaches {size} MB.\nArchived logs from the last {days} days are kept.\nLogs record service, tray, popup, shortcut, data, and error events without saving clipboard contents.',
-    logRetentionDays: 'Archived log retention',
-    helpLogRetentionDays: 'Sets how many days of archived logs are kept. The default is 7 days to prevent the portable data folder from growing silently.',
-    days: 'days',
-    logPath: 'Log folder',
-    noLogFiles: 'No log files yet.',
-    openLogFolder: 'Open log folder',
-    refreshLogs: 'Refresh logs',
-    clearLogs: 'Clear logs',
-    confirmClearLogs: 'Clear all current and archived log files? A new empty runtime log will be created immediately after cleanup.',
-    clearLogsDone: 'Logs cleared.',
-    checkUpdate: 'Check update',
-    updatePlaceholderTitle: 'Update status',
-    updatePlaceholderMessage: 'ClipAnchor will check for updates.',
-    updateCheckingTitle: 'Checking for updates',
-    updateCheckingMessage: 'Checking for available updates.',
-    updateCheckingDetail: '',
-    updateDownloadingTitle: 'Downloading update package',
-    updateDownloadingMessage: 'Downloading the update package.',
-    updateDownloadingDetail: '',
-    updateReadyTitle: 'Update is ready',
-    updateReadyMessage: 'The update package is ready.',
-    updateReadyDetail: '',
-    updateInstallingTitle: 'Opening installer',
-    updateInstallingMessage: 'Opening the installer.',
-    updateInstallingDetail: '',
-    updateNoUpdateTitle: 'You are up to date',
-    updateNoUpdateMessage: 'Current version is up to date.',
-    updateNoUpdateDetail: '',
-    updateAvailableTitle: 'New release found',
-    updateAvailableMessage: 'A newer version is available.',
-    updateAvailableDetail: '',
-    updateAssetUnavailableTitle: 'No matching package',
-    updateAssetUnavailableMessage: 'A newer version exists, but no compatible installer is available yet.',
-    updateAssetUnavailableDetail: '',
-    updateFailedTitle: 'Update was not completed',
-    updateFailedMessage: 'The update check could not be completed.',
-    updateFailedDetail: 'Check your network and try again.',
-    updateInstallNow: 'Install now',
-    updateLater: 'Later',
-    updatePleaseWait: 'Please wait…',
-    updateRuntimeChecking: '',
-    updateRuntimeDownloading: '',
-    updateRuntimeReady: '',
-    updateRuntimeInstalling: '',
-    updateRuntimeNoUpdate: '',
-    updateRuntimeAvailable: '',
-    updateRuntimeAssetUnavailable: '',
-    updateRuntimeFailed: '',
-    updateRuntimeIdle: '',
-    updateCurrentVersion: 'Current',
-    updateLatestVersion: 'Latest',
-    updateReleaseTag: 'Release',
-    updatePackage: 'Package',
-    updateDownloadedPath: 'Saved update package',
-    updateCheckedAt: 'Checked at',
-    confirmPosition: 'Save position',
-    resetPosition: 'Reset default',
-    dragHint: 'Drag this simulated popup to the default position.',
-    positionMapTitle: 'Safe position map',
-    positionMapHint: 'Drag the mini popup inside this screen map. The valid boundary subtracts the real popup size, so the popup will not overflow the screen.',
-    pin: 'Pin',
-    unpin: 'Unpin',
-    confirmUnpinTitle: 'Unpin and close?',
-    confirmUnpinMessage: 'Are you sure you want to unpin and close this window?',
-    markFavorite: 'Add to favorites',
-    unmarkFavorite: 'Remove from favorites',
-    filters: 'Filters',
-    service: 'Service',
-    dataSafety: 'Data safety',
-    shortcutsHint: '',
-    shortcutPinService: 'Toggle pin service',
-    shortcutHistoryService: 'Toggle history service',
-    shortcutMainWindow: 'Toggle main window',
-    shortcutLiteMode: 'Enter Lite mode',
-    shortcutThemeMode: 'Toggle dark / light theme',
-    shortcutCommandW: 'Hide main window',
-    helpShortcutCommandW: 'Built-in macOS shortcut. It cannot be edited and maps Command+W to hiding the main window instead of quitting ClipAnchor.',
-    noScrollPopup: 'Runtime feed',
-    commandClipboard: 'Clipboard workspace ready',
-    commandSettings: 'Runtime settings active',
-    commandFavorites: 'Saved clips workspace ready',
-    favoriteBoardTitle: 'Saved items',
-    favoriteOnlyEmpty: 'No saved clips yet. Star any history record to keep it here.',
-    allFavorites: 'All saved',
-    popupScale: 'Popup scale',
-    helpPopupScale: 'Adjusts popup window and internal element scale in 5% steps, independently from the main interface.',
-    resetScale: 'Reset to 100%',
-    edit: 'Edit',
-    quitApp: 'Quit ClipAnchor',
-    confirmQuit: 'Quit ClipAnchor and stop background clipboard services?',
-    dataUsage: 'Storage used',
-    historyLimit: 'History limit',
-    unlimited: 'unlimited',
-    helpHistoryLimit: '0 keeps unlimited history. Set a limit to read only the latest records when the database grows large.',
-    refreshFavorites: 'Refresh saved items',
-    backToTop: 'Back to top',
-    favoritesValid: 'All saved items are still valid.',
-    favoritesInvalid: 'Some saved items point to missing resources. Delete them?',
-    versionAndUpdates: 'Version and updates',
-    softwareVersion: 'Software version',
-    autoUpdate: 'Auto update',
-    helpAutoUpdate: 'When enabled, ClipAnchor silently checks GitHub Releases at startup and downloads compatible packages in the background. It does not install anything without your confirmation.',
-    updateQuietHint: 'Startup checks stay silent. You will only be prompted when a compatible update is ready or a download fallback needs your decision.',
-    updateAttentionHint: 'An update needs your attention. You can install it now or keep the reminder dot for later.'
-  },
-  zh: {
-    clipboard: '剪贴板',
-    settings: '设置',
-    favoritesNav: '收藏夹',
-    favoritesEyebrow: '重要内容',
-    favoritesTitle: '收藏内容',
-    favoritesSubtitle: '集中管理已标星保存的剪贴板记录。你可以编辑文本、复制内容、刷新资源有效性，也可以一键生成桌面置顶弹窗。',
-    portableNative: '便携原生',
-    clipboardEyebrow: '高效剪贴板',
-    historyEyebrow: '历史工作区',
-    settingsEyebrow: '控制中心',
-    clipboardTitle: '像命令中心一样管理剪贴板。',
-    clipboardSubtitle: '用开发者工具式的命令中心管理文本、图片与文件。常用内容可固定保存，也可以随时从历史记录生成桌面置顶弹窗。',
-    settingsTitle: '配置运行环境。',
-    settingsSubtitle: '在一个紧凑的操作面板中管理服务、快捷键、数据、隐私与弹窗位置。',
-    pinRunning: '置顶服务运行中',
-    pinPaused: '置顶服务已暂停',
-    privacyOn: '敏感过滤开启',
-    privacyOff: '敏感过滤关闭',
-    search: '搜索文本、文件、图片...',
-    all: '全部',
-    favorite: '收藏',
-    favorites: '收藏',
-    recent: '最近',
-    text: '文本',
-    image: '图片',
-    file: '文件',
-    mixed: '混合',
-    copy: '复制',
-    delete: '删除',
-    deleteOne: '删除此记录',
-    confirmDeleteOne: '删除这条历史记录吗？',
-    ok: '确定',
-    invalidTitle: '内容已失效',
-    textRecordEmptyTitle: '文本为空',
-    confirmDeleteOneTitle: '删除记录',
-    confirmDeleteFavoriteTitle: '删除收藏记录',
-    confirmDeleteFavorite: '这条记录已收藏。仍然删除吗？删除后也会从收藏夹移除。',
-    confirmDeleteSelectedTitle: '删除所选记录',
-    confirmDeleteSelected: '删除已选择的历史记录吗？',
-    confirmDeleteSelectedFavoriteTitle: '删除所选收藏记录',
-    confirmDeleteSelectedFavorite: '所选内容中包含收藏记录。仍然删除所有选中记录吗？',
-    favoritesValidTitle: '收藏已检查',
-    favoritesInvalidTitle: '收藏已失效',
-    clear: '清空历史记录',
-    clearNonPinned: '清空非收藏记录',
-    clearIncludingPinned: '强制清空全部',
-    confirmClearNonPinned: '确定清空全部非收藏历史记录吗？收藏记录会被保留。',
-    confirmForceClear: '确定强制清空包括收藏在内的全部历史记录吗？该操作不可撤销。',
-    clearDone: '历史记录已清空。',
-    deleteBeforeDays: '删除指定天数前的记录',
-    deleteBeforeDaysAction: '删除 {days} 天前记录',
-    preserveFavorites: '保留收藏',
-    helpDeleteBeforeDays: '删除早于指定天数的历史记录。开关开启时会保留收藏记录。',
-    confirmDeleteBeforeDays: '确定删除 {days} 天前的历史记录吗？',
-    deleteBeforeDaysDone: '已删除 {count} 条旧记录。',
-    cleanupDaysInvalid: '请输入大于 0 的天数。',
-    pinnedProtected: '收藏记录受保护，请先取消收藏再删除。',
-    invalid: '该内容已失效，是否删除此条记录？',
-    empty: '暂无历史记录。开启历史记录服务后复制内容即可保存。',
-    itemCount: '条记录',
-    selected: '已选择',
-    protectedCount: '受保护',
-    totalBytes: '本地存储',
-    quickPin: '置顶为弹窗',
-    addText: '新增文本',
-    addTextRecord: '新增文本记录',
-    editText: '编辑文本',
-    editTextRecord: '编辑文本记录',
-    manualTextEyebrow: '手动片段',
-    editTextEyebrow: '文本历史',
-    textRecordPlaceholder: '输入要保存到 ClipAnchor 历史记录中的文本...',
-    textRecordEmpty: '文本不能为空。',
-    save: '保存',
-    cancel: '取消',
-    confirm: '确认',
-    close: '关闭',
-    minimize: '最小化',
-    maximize: '最大化',
-    clipboardBoardTitle: '剪贴板看板',
-    basic: '基础设置',
-    appearance: '外观',
-    appearanceHint: '',
-    runtime: '运行行为',
-    sizingAndTiming: '尺寸与时间',
-    runtimeHint: '',
-    shortcuts: '快捷键设置',
-    position: '弹窗位置',
-    data: '数据管理',
-    pinService: '置顶服务',
-    historyService: '历史记录服务',
-    privacyMode: '敏感过滤',
-    privacyOffMode: '关闭',
-    privacyLightMode: '轻量',
-    privacySmartMode: '智能',
-    privacySmartTitle: '智能过滤暂未启用',
-    privacySmartUnavailable: '智能过滤暂未启用。ClipAnchor 将继续使用轻量过滤，以保证剪贴板捕获性能。',
-    ok: '确定',
-    helpPinService: '开启后，新复制的内容可以生成桌面弹窗卡片。',
-    helpHistoryService: '开启后，复制内容会保存到本地 SQLite 历史数据库。',
-    helpPrivacy: '敏感过滤支持三档：关闭会保留所有捕获；轻量为默认值，使用快速正则和启发式规则；智能会额外采用更严格的图片/文件过滤，适合高敏场景。',
-    helpAutoStart: '登录系统后自动启动 ClipAnchor。',
-    macosLoginItemError: '未能将 ClipAnchor 添加到 macOS「登录时打开」。请打开「系统设置 > 隐私与安全性 > 自动化」，允许 ClipAnchor 控制“系统事件”，然后关闭并重新开启“开机自启动”。详细信息：{detail}',
-    unknownError: '未知错误',
-    helpAutoHide: '鼠标未进入弹窗时隐藏操作按钮，让弹窗更干净。',
-    helpAutoDestroy: '未钉住且无交互的弹窗会在该时间后自动关闭。',
-    helpLiteDelay: '空闲达到该时间后，减少界面渲染负担，仅保留后台服务。',
-    helpUiScale: '每次按 5% 调整界面文字和组件密度，不整体缩放窗口。',
-    helpLanguage: '自动模式会跟随系统语言，手动选择后以手动设置为准。',
-    helpTheme: '跟随系统会读取系统深浅模式；深色和浅色为固定选择。',
-    helpAnimation: '优美模式启用细腻动效；性能模式只保留必要过渡。',
-    helpPopupWidth: '设置新生成桌面弹窗的默认宽度。',
-    helpPopupHeight: '设置新生成桌面弹窗的默认高度。',
-    helpPosition: '在地图中拖动小弹窗，设置新弹窗默认出现位置。',
-    helpClearNonPinned: '删除普通历史记录，但保留收藏记录。',
-    helpForceClear: '删除全部历史记录，包括收藏记录。',
-    autoStart: '开机自启动',
-    autoHide: '弹窗按钮自动隐藏',
-    autoDestroy: '弹窗自动销毁延时',
-    liteDelay: '轻量模式延时',
-    lightDelay: '轻量模式延时',
-    scale: '界面缩放比例',
-    language: '语言',
-    autoLanguage: '自动',
-    theme: '主题',
-    animation: '动画模式',
-    elegant: '优美模式',
-    performance: '性能模式',
-    system: '跟随系统',
-    dark: '深色',
-    light: '浅色',
-    small: '小',
-    medium: '中',
-    large: '大',
-    popupSize: '弹窗大小',
-    popupSizeHint: '',
-    popupWidth: '宽度',
-    popupHeight: '高度',
-    adjust: '调整弹窗位置',
-    export: '导出历史记录',
-    import: '导入历史记录',
-    exportJson: '导出 JSON',
-    exportCsv: '导出 CSV',
-    importJson: '导入 JSON',
-    importCsv: '导入 CSV',
-    dbPath: '数据库路径',
-    logManagement: '日志管理',
-    logManagementTitle: '运行诊断日志',
-    logManagementHint: 'ClipAnchor 会在当前日志达到 {size} MB 后自动轮转。\n会保留最近 {days} 天内的归档日志。\n日志只记录服务、托盘、弹窗、快捷键、数据和错误事件，不保存剪贴板正文。',
-    logRetentionDays: '归档日志保留天数',
-    helpLogRetentionDays: '设置归档日志保留几天。默认 7 天，避免便携 data 目录中的日志文件静默堆积。',
-    days: '天',
-    logPath: '日志目录',
-    noLogFiles: '暂无日志文件。',
-    openLogFolder: '打开日志目录',
-    refreshLogs: '刷新日志',
-    clearLogs: '清理日志',
-    confirmClearLogs: '确定清理全部当前日志和归档日志吗？清理后会立即创建一条新的运行日志。',
-    clearLogsDone: '日志已清理。',
-    checkUpdate: '检查更新',
-    updatePlaceholderTitle: '更新状态',
-    updatePlaceholderMessage: 'ClipAnchor 将检查可用更新。',
-    updateCheckingTitle: '正在检查更新',
-    updateCheckingMessage: '正在检查可用更新。',
-    updateCheckingDetail: '',
-    updateDownloadingTitle: '正在下载更新包',
-    updateDownloadingMessage: '正在下载更新包。',
-    updateDownloadingDetail: '',
-    updateReadyTitle: '更新已准备好',
-    updateReadyMessage: '更新包已准备好。',
-    updateReadyDetail: '',
-    updateInstallingTitle: '正在打开安装器',
-    updateInstallingMessage: '正在打开安装器。',
-    updateInstallingDetail: '',
-    updateNoUpdateTitle: '当前已是最新',
-    updateNoUpdateMessage: '当前版本已是最新。',
-    updateNoUpdateDetail: '',
-    updateAvailableTitle: '发现新发布版本',
-    updateAvailableMessage: '检测到新版本。',
-    updateAvailableDetail: '',
-    updateAssetUnavailableTitle: '没有匹配安装包',
-    updateAssetUnavailableMessage: '发现新版本，但暂无兼容安装包。',
-    updateAssetUnavailableDetail: '',
-    updateFailedTitle: '更新未完成',
-    updateFailedMessage: '更新检查未能完成。',
-    updateFailedDetail: '请检查网络后重试。',
-    updateInstallNow: '立即更新',
-    updateLater: '稍后提醒',
-    updatePleaseWait: '请稍候…',
-    updateRuntimeChecking: '',
-    updateRuntimeDownloading: '',
-    updateRuntimeReady: '',
-    updateRuntimeInstalling: '',
-    updateRuntimeNoUpdate: '',
-    updateRuntimeAvailable: '',
-    updateRuntimeAssetUnavailable: '',
-    updateRuntimeFailed: '',
-    updateRuntimeIdle: '',
-    updateCurrentVersion: '当前版本',
-    updateLatestVersion: '最新版本',
-    updateReleaseTag: '发布版本',
-    updatePackage: '安装包',
-    updateDownloadedPath: '本地更新包',
-    updateCheckedAt: '检查时间',
-    confirmPosition: '保存位置',
-    resetPosition: '恢复默认',
-    dragHint: '拖动这个模拟弹窗，设置新的默认弹出位置。',
-    positionMapTitle: '安全位置地图',
-    positionMapHint: '在屏幕地图中拖动模拟弹窗。有效边界会扣除真实弹窗尺寸，因此弹窗不会溢出屏幕。',
-    pin: '钉住',
-    unpin: '取消置顶',
-    confirmUnpinTitle: '取消置顶并关闭？',
-    confirmUnpinMessage: '确定要取消置顶并关闭此窗口吗？',
-    markFavorite: '加入收藏',
-    unmarkFavorite: '取消收藏',
-    filters: '过滤视图',
-    service: '服务状态',
-    dataSafety: '数据保护',
-    shortcutsHint: '',
-    shortcutPinService: '启动 / 关闭置顶服务',
-    shortcutHistoryService: '启动 / 关闭历史记录服务',
-    shortcutMainWindow: '显示 / 隐藏主界面',
-    shortcutLiteMode: '立即进入轻量模式',
-    shortcutThemeMode: '切换深色 / 浅色主题',
-    shortcutCommandW: '隐藏主程序界面',
-    helpShortcutCommandW: 'macOS 内嵌快捷键，不能修改。Command+W 会隐藏主界面，不会退出 ClipAnchor 后台服务。',
-    noScrollPopup: '运行记录',
-    commandClipboard: '剪贴板工作区已就绪',
-    commandSettings: '运行设置已启用',
-    commandFavorites: '收藏内容工作区已就绪',
-    favoriteBoardTitle: '已收藏记录',
-    favoriteOnlyEmpty: '暂无收藏内容。给任意历史记录点星标后会出现在这里。',
-    allFavorites: '全部',
-    popupScale: '弹窗缩放比例',
-    helpPopupScale: '每次按 5% 调整弹窗窗口与内部元素大小，独立于主界面缩放。',
-    resetScale: '重置为 100%',
-    edit: '编辑',
-    quitApp: '退出程序',
-    confirmQuit: '退出 ClipAnchor 并停止后台剪贴板服务吗？',
-    dataUsage: '占用大小',
-    historyLimit: '历史记录上限',
-    unlimited: '无限',
-    helpHistoryLimit: '0 表示无限保留历史记录；数据库变大时可以设置只读取最新记录的数量。',
-    refreshFavorites: '刷新有效性',
-    backToTop: '返回顶部',
-    favoritesValid: '当前收藏内容均有效。',
-    favoritesInvalid: '部分收藏内容指向的资源已失效，是否删除？',
-    versionAndUpdates: '版本与更新',
-    softwareVersion: '软件版本',
-    autoUpdate: '自动更新',
-    helpAutoUpdate: '开启后，ClipAnchor 会在启动时静默检查 GitHub Releases，并在后台下载兼容安装包。不会在未确认时自动安装。',
-    updateQuietHint: '启动检查保持静默。只有兼容更新准备好，或下载失败但需要你选择时才提示。',
-    updateAttentionHint: '有更新需要处理。你可以立即安装，也可以保留提醒点稍后再处理。'
-  }
-};
+const builtinModules = import.meta.glob('./locales/*.js', { eager: true });
+const coreLanguageCodes = new Set(['en', 'zh']);
 
-function resolveLocale(locale) {
-  if (locale === 'auto') {
-    const browserLanguage = (navigator.language || navigator.userLanguage || '').toLowerCase();
-    return browserLanguage.startsWith('zh') ? 'zh' : 'en';
-  }
-  return locale === 'zh' ? 'zh' : 'en';
+function canonicalizeLocalePart(part, index) {
+  const value = String(part || '').replace(/[^a-zA-Z0-9]/g, '');
+  if (!value) return '';
+  if (index === 0) return value.toLowerCase();
+  if (/^[a-zA-Z]{4}$/.test(value)) return `${value.slice(0, 1).toUpperCase()}${value.slice(1).toLowerCase()}`;
+  if (/^[a-zA-Z]{2}$/.test(value) || /^\d{3}$/.test(value)) return value.toUpperCase();
+  return value.toLowerCase();
 }
 
-export function createTranslator(locale) {
-  const lang = resolveLocale(locale);
+function normalizeLanguageCode(value) {
+  const parts = String(value || '')
+    .trim()
+    .replace(/_/g, '-')
+    .split('-')
+    .map((part, index) => canonicalizeLocalePart(part, index))
+    .filter(Boolean);
+  // 语言包文件名和 API 目标语言都使用标准 BCP-47 大小写，是为了区分 zh-Hant/zh-TW 这类繁体中文与内置简体中文。
+  // Language pack filenames and API target locales use standard BCP-47 casing so zh-Hant/zh-TW stay distinct from the built-in Simplified Chinese locale.
+  return parts.join('-');
+}
+
+function languageCodeFromPath(path) {
+  const name = String(path || '').split('/').pop() || '';
+  return normalizeLanguageCode(name.replace(/\.(js|json)$/i, ''));
+}
+
+function normalizeLanguagePack(raw, path = '') {
+  const source = raw?.default || raw || {};
+  const code = normalizeLanguageCode(source.code || source.locale || languageCodeFromPath(path));
+  const messages = source.messages || source.dictionary || {};
+  if (!code || !messages || typeof messages !== 'object') return null;
+  const integrity = source.integrity || (Object.keys(messages).length ? 'complete' : 'incomplete');
+  return {
+    code,
+    label: source.label || source.name || inferLanguageLabel(code),
+    nativeName: source.nativeName || source.native_name || source.label || source.name || inferLanguageLabel(code),
+    builtin: Boolean(source.builtin),
+    source: source.source || '',
+    generatedAt: source.generatedAt || source.generated_at || '',
+    fileName: source.fileName || source.file_name || '',
+    integrity,
+    missingKeys: source.missingKeys || source.missing_keys || [],
+    integrityError: source.integrityError || source.integrity_error || '',
+    messageStatus: source.messageStatus || source.message_status || {},
+    outdatedKeys: source.outdatedKeys || source.outdated_keys || [],
+    removedKeys: source.removedKeys || source.removed_keys || [],
+    format: source.format || '',
+    sourceLocale: source.sourceLocale || source.source_locale || 'en',
+    messages
+  };
+}
+
+const builtinLanguages = Object.entries(builtinModules)
+  .map(([path, module]) => normalizeLanguagePack(module, path))
+  .filter(Boolean)
+  .sort((a, b) => (a.code === 'en' ? -1 : b.code === 'en' ? 1 : a.label.localeCompare(b.label)));
+
+const builtinCatalogs = new Map(builtinLanguages.map((language) => [language.code, language]));
+
+export function normalizeLocaleCode(value) {
+  return normalizeLanguageCode(value);
+}
+
+export function inferLanguageLabel(code) {
+  const normalized = normalizeLanguageCode(code);
+  if (!normalized) return '';
+  try {
+    const display = new Intl.DisplayNames([normalized, 'en'], { type: 'language' });
+    const label = display.of(normalized);
+    if (label) return label;
+  } catch (_) {}
+  return normalized.toUpperCase();
+}
+
+export function detectSystemLanguageCode() {
+  return normalizeLanguageCode(navigator.language || navigator.userLanguage || 'en') || 'en';
+}
+
+export function listBuiltinLanguages() {
+  return builtinLanguages.map((language) => ({ ...language, messages: undefined }));
+}
+
+export function listLanguageChoices(runtimePacks = []) {
+  const merged = new Map();
+  for (const language of builtinLanguages) {
+    merged.set(language.code, { ...language, messages: undefined });
+  }
+  for (const pack of runtimePacks || []) {
+    const normalized = normalizeLanguagePack(pack);
+    if (!normalized || coreLanguageCodes.has(normalized.code)) continue;
+    merged.set(normalized.code, { ...normalized, messages: undefined });
+  }
+  return Array.from(merged.values()).sort((a, b) => {
+    const leftCore = coreLanguageCodes.has(a.code);
+    const rightCore = coreLanguageCodes.has(b.code);
+    if (leftCore !== rightCore) return leftCore ? -1 : 1;
+    return a.label.localeCompare(b.label);
+  });
+}
+
+function buildCatalogMap(runtimePacks = []) {
+  const catalogs = new Map(builtinCatalogs);
+  for (const pack of runtimePacks || []) {
+    const normalized = normalizeLanguagePack(pack);
+    if (!normalized || coreLanguageCodes.has(normalized.code)) continue;
+    if (['corrupt', 'incomplete'].includes(normalized.integrity) || !Object.keys(normalized.messages || {}).length) continue;
+    // 可增量更新的语言包仍可继续使用，缺失的新文本会走内置回退；只有损坏、不完整或完全无内容的文件才被排除。
+    // Packs with incremental updates available remain usable and fall back for newly missing text; only damaged, incomplete, or empty files are excluded.
+    catalogs.set(normalized.code, normalized);
+  }
+  return catalogs;
+}
+
+function findCatalog(catalogs, code) {
+  const normalized = normalizeLanguageCode(code);
+  if (catalogs.has(normalized)) return catalogs.get(normalized);
+  const base = normalized.split('-')[0];
+  if (catalogs.has(base)) return catalogs.get(base);
+  return catalogs.get('en');
+}
+
+function resolveLocale(locale, runtimePacks = []) {
+  const catalogs = buildCatalogMap(runtimePacks);
+  const requested = locale === 'auto' ? detectSystemLanguageCode() : locale;
+  return findCatalog(catalogs, requested)?.code || 'en';
+}
+
+export function getReferenceMessages(code = 'en') {
+  return { ...(builtinCatalogs.get(normalizeLanguageCode(code))?.messages || builtinCatalogs.get('en')?.messages || {}) };
+}
+
+export function createTranslator(locale, runtimePacks = []) {
+  const catalogs = buildCatalogMap(runtimePacks);
+  const lang = resolveLocale(locale, runtimePacks);
+  const localized = catalogs.get(lang)?.messages || catalogs.get('en')?.messages || {};
+  const baseCode = lang.split('-')[0];
+  const baseFallback = catalogs.get(baseCode)?.messages;
+  const fallback = catalogs.get('en')?.messages || localized;
   return (key) => {
-    const localized = messages[lang] || messages.en;
     // 空字符串也是合法翻译，用于刻意隐藏冗余说明；不能用 || 回退，否则会把内部键名暴露给用户。
     // An empty string is a valid translation for intentionally hidden notes; avoid || fallback so internal keys are never shown to users.
     if (Object.prototype.hasOwnProperty.call(localized, key)) {
       return localized[key];
     }
-    if (Object.prototype.hasOwnProperty.call(messages.en, key)) {
-      return messages.en[key];
+    if (baseFallback && Object.prototype.hasOwnProperty.call(baseFallback, key)) {
+      // 运行时语言包缺少新增文案时，先回退到同语族内置语言，是为了避免扩展中文包显示英文系统提示。
+      // When a runtime pack misses newly added text, fallback to the built-in language with the same base code before English so Chinese extension packs do not show English system notices.
+      return baseFallback[key];
+    }
+    if (Object.prototype.hasOwnProperty.call(fallback, key)) {
+      return fallback[key];
     }
     return '';
   };

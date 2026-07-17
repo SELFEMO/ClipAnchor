@@ -1,0 +1,22 @@
+{
+  "format": "clipanchor-language-pack",
+  "code": "fr",
+  "label": "French",
+  "native_name": "Français",
+  "source": "manual",
+  "source_locale": "en",
+  "generated_at": "",
+  "provider": "manual",
+  "messages": {
+    "_comment": "Replace this object with every key from src/locales/en.js. Translate values only and remove this _comment entry.",
+    "settings": "Paramètres",
+    "cancel": "Annuler",
+    "ok": "OK"
+  },
+  "message_status": {},
+  "integrity": "",
+  "integrity_error": "",
+  "missing_keys": [],
+  "outdated_keys": [],
+  "removed_keys": []
+}

@@ -19,7 +19,7 @@
   --shadow: rgba(0, 0, 0, .36);
   --scroll-thumb: rgba(49, 159, 255, .58);
   --mono: "SFMono-Regular", "Cascadia Code", "JetBrains Mono", Consolas, monospace;
-  --window-radius: 24px;
+  --window-radius: 30px;
 }
 
 * { box-sizing: border-box; }
@@ -96,7 +96,7 @@ kbd {
 .codex-sidebar, .codex-main, .content-surface {
   border: 1px solid var(--line);
   background: var(--panel);
-  backdrop-filter: blur(22px) saturate(140%);
+  backdrop-filter: none;
   box-shadow: 0 22px 70px var(--shadow), inset 0 1px 0 rgba(255, 255, 255, .055);
 }
 .codex-sidebar {
@@ -5180,4 +5180,1866 @@ h1 {
 
 .floating-help-bubble.align-center {
   text-align: left;
+}
+
+
+/* GPU 负载优化：持续动效和大面积实时模糊会让 WebView 在后台也保持合成线程忙碌，因此优美模式只保留一次性过渡。 */
+/* GPU load optimization: continuous effects and large live blurs can keep WebView compositing busy in the background, so elegant mode keeps only one-shot transitions. */
+.motion-elegant .codex-frame::before,
+.motion-elegant .primary-button::after,
+.motion-elegant .pill-action::after,
+.motion-elegant .pin-button::after,
+.boot-orbit span,
+.update-progress.is-indeterminate span,
+.update-placeholder-icon.is-spinning {
+  animation: none !important;
+}
+
+/* GPU 负载优化：主面板使用不透明分层背景代替 backdrop-filter，避免 Linux/透明窗口组合下出现异常高 GPU 占用。 */
+/* GPU load optimization: main panels use opaque layered backgrounds instead of backdrop-filter to avoid abnormal Linux/transparent-window GPU usage. */
+.codex-sidebar,
+.codex-main,
+.content-surface {
+  background: color-mix(in srgb, var(--panel-solid) 92%, transparent) !important;
+  backdrop-filter: none !important;
+}
+
+
+/* Final Windows main-window radius sync. */
+/* 主窗口改为透明 WebView + 单层 CSS 圆角，是为了保留弹窗现有圆角，同时避免 Windows Region 裁剪主窗口时产生直线残边。 */
+/* The main window uses a transparent WebView plus one CSS radius so existing popup corners are preserved while Windows Region artifacts on the main UI are avoided. */
+:root {
+  --window-radius: var(--popup-window-radius, 30px);
+  --popup-window-radius: 30px;
+}
+body:not(.clipanchor-popup-body) #root {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+.codex-shell.app-shell {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden !important;
+  isolation: isolate;
+  border-radius: var(--window-radius) !important;
+  clip-path: none !important;
+  background-clip: padding-box;
+}
+.native-titlebar {
+  border-top-left-radius: var(--window-radius);
+  border-top-right-radius: var(--window-radius);
+}
+
+/* Main window chrome redesign: the old full-width title strip is removed because it visually competed with the custom rounded app shell. */
+/* 主窗口顶部区域重新设计：移除旧的整宽标题条，因为它会和自绘圆角应用外壳形成突兀冲突。 */
+.codex-shell.app-shell {
+  position: relative;
+  display: block !important;
+  padding: 0 !important;
+}
+
+body:not(.clipanchor-popup-body) .native-titlebar {
+  position: absolute;
+  top: 12px;
+  left: 18px;
+  right: 18px;
+  z-index: 60;
+  height: 34px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  align-items: center;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--muted);
+}
+
+body:not(.clipanchor-popup-body) .native-titlebar-brand {
+  display: none !important;
+}
+
+body:not(.clipanchor-popup-body) .native-titlebar-drag {
+  width: 100%;
+  height: 100%;
+  min-width: 24px;
+  border-radius: 999px;
+  -webkit-app-region: drag;
+}
+
+body:not(.clipanchor-popup-body) .native-window-controls {
+  position: relative;
+  z-index: 62;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 76%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--panel-solid) 82%, transparent);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, .22), inset 0 1px 0 rgba(255, 255, 255, .055);
+  -webkit-app-region: no-drag;
+}
+
+body:not(.clipanchor-popup-body) .native-window-controls button {
+  width: 28px !important;
+  height: 26px !important;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  color: var(--muted);
+  background: transparent;
+  -webkit-app-region: no-drag;
+  transition: background .16s ease, color .16s ease, transform .16s ease;
+}
+
+body:not(.clipanchor-popup-body) .native-window-controls button:hover {
+  color: var(--text-strong);
+  background: color-mix(in srgb, var(--surface-hover) 88%, transparent);
+  transform: translateY(-1px);
+}
+
+body:not(.clipanchor-popup-body) .native-window-controls .close-control:hover {
+  color: #fff;
+  background: rgba(239, 68, 68, .84);
+}
+
+/* The content keeps a small top breathing space so floating controls never cover the cards while the former titlebar line remains gone. */
+/* 内容区保留少量顶部呼吸空间，使悬浮控制按钮不遮挡卡片，同时彻底去掉原来的标题栏分割线。 */
+body:not(.clipanchor-popup-body) .codex-frame {
+  width: 100% !important;
+  height: 100vh !important;
+  margin: 0 !important;
+  padding: 52px 18px 18px !important;
+  grid-template-columns: minmax(236px, 252px) minmax(0, 1fr);
+}
+
+.theme-light body:not(.clipanchor-popup-body) .native-window-controls,
+body.theme-light:not(.clipanchor-popup-body) .native-window-controls {
+  background: rgba(255, 255, 255, .78);
+  box-shadow: 0 12px 30px rgba(18, 36, 66, .12), inset 0 1px 0 rgba(255, 255, 255, .72);
+}
+
+@media (max-width: 760px) {
+  body:not(.clipanchor-popup-body) .native-titlebar {
+    top: 10px;
+    left: 12px;
+    right: 12px;
+  }
+
+  body:not(.clipanchor-popup-body) .codex-frame {
+    padding: 48px 12px 12px !important;
+  }
+}
+
+/* Main chrome compact placement: the window buttons live inside the workspace breathing area instead of reserving a fake titlebar row. */
+/* 主窗口控制区紧凑放置：窗口按钮进入工作区右上角的留白，而不是额外占用一整行伪标题栏。 */
+body:not(.clipanchor-popup-body) .native-titlebar {
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  height: 30px !important;
+  pointer-events: none;
+}
+
+/* The invisible drag strip stays at the very top so the restored content area remains interactive and visually compact. */
+/* 不可见拖拽条只保留在窗口最顶部，这样恢复出来的内容区既能交互，也不会再出现无用空白。 */
+body:not(.clipanchor-popup-body) .native-titlebar-drag {
+  position: absolute;
+  inset: 0 132px 0 0;
+  height: 30px !important;
+  min-width: 0 !important;
+  border-radius: 0 !important;
+  pointer-events: auto;
+  -webkit-app-region: drag;
+}
+
+/* The control group is anchored to the main canvas corner so it reads as a quiet floating tool rather than a system titlebar. */
+/* 控制按钮组锚定在主画布右上角，让它看起来像轻量悬浮工具，而不是系统标题栏。 */
+body:not(.clipanchor-popup-body) .native-window-controls {
+  position: fixed !important;
+  /* 控制组向左下收进主画布，是为了避开窗口外圆角和内容卡片边缘，形成更稳定的视觉留白。 */
+  /* The control group is pulled inward toward the lower-left so it clears the outer corner and nearby card edges with steadier breathing room. */
+  top: 33px !important;
+  right: 33px !important;
+  height: 34px !important;
+  pointer-events: auto;
+}
+
+/* Removing the former titlebar reservation lets the app panels move up and use the full rounded shell more naturally. */
+/* 移除旧标题栏预留空间后，应用面板可以上移，更自然地占满自绘圆角外壳。 */
+body:not(.clipanchor-popup-body) .codex-frame {
+  padding: 18px !important;
+}
+
+/* The workspace header keeps a safe right gutter so the floating controls never cover title copy at common window sizes. */
+/* 工作区标题保留右侧安全间距，避免悬浮控制按钮在常见窗口尺寸下遮挡标题文案。 */
+body:not(.clipanchor-popup-body) .workspace-header {
+  padding-right: 166px !important;
+}
+
+@media (max-width: 760px) {
+  body:not(.clipanchor-popup-body) .native-window-controls {
+    top: 22px !important;
+    right: 24px !important;
+  }
+
+  body:not(.clipanchor-popup-body) .native-titlebar-drag {
+    inset: 0 124px 0 0;
+  }
+
+  body:not(.clipanchor-popup-body) .codex-frame {
+    padding: 12px !important;
+  }
+
+  body:not(.clipanchor-popup-body) .workspace-header {
+    padding-right: 136px !important;
+  }
+}
+
+
+/* 版本更新控件在普通窗口中只承担辅助操作，压缩尺寸可以避免它们压过版本说明的视觉层级。 */
+/* Update controls are secondary actions in the normal window, so compact sizing keeps them from overpowering the version copy. */
+.version-update-panel {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.version-auto-row {
+  grid-template-columns: auto auto !important;
+  align-self: center !important;
+  min-height: 46px !important;
+  padding: 8px 12px !important;
+  gap: 10px !important;
+  border-radius: 14px !important;
+}
+
+.version-auto-row .setting-name {
+  flex: 0 0 auto !important;
+  white-space: nowrap;
+}
+
+.version-auto-row .switch {
+  width: 42px;
+  height: 24px;
+  padding: 3px;
+}
+
+.version-auto-row .switch span {
+  width: 16px;
+  height: 16px;
+}
+
+.version-auto-row .switch.on span {
+  transform: translateX(18px);
+}
+
+.version-check-button {
+  align-self: center;
+  min-height: 46px;
+  height: 46px;
+  padding: 0 14px;
+  border-radius: 14px;
+}
+
+/* 最大化时窗口应成为一整块桌面画布，取消外层圆角可以避免四角露出桌面背景。 */
+/* When maximized, the window should become a full desktop canvas; removing the outer radius prevents desktop corners from showing through. */
+body:not(.clipanchor-popup-body) .codex-shell.app-shell.window-maximized {
+  border-radius: 0 !important;
+  clip-path: none !important;
+  background-clip: border-box !important;
+}
+
+body:not(.clipanchor-popup-body) .codex-shell.app-shell.window-maximized .codex-frame {
+  width: 100% !important;
+  height: 100vh !important;
+}
+
+@media (max-width: 980px) {
+  .version-update-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .version-auto-row,
+  .version-check-button {
+    width: 100%;
+  }
+}
+
+
+/* Language packs are separated from the core segmented control so many generated languages cannot stretch the settings layout. */
+/* 语言包与核心分段控件分离，是为了避免生成语言过多时把设置页布局横向撑坏。 */
+.language-control-row {
+  align-items: flex-start !important;
+}
+
+.language-extension-panel {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--surface) 56%, transparent);
+}
+
+.language-pack-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.language-pack-heading span {
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.language-pack-heading small {
+  max-width: 520px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: right;
+}
+
+.language-pack-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.language-pack-option {
+  min-height: 44px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+  border-radius: 13px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--panel-solid) 68%, transparent);
+  text-align: left;
+}
+
+.language-pack-option:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  background: color-mix(in srgb, var(--surface-hover) 72%, transparent);
+}
+
+.language-pack-option.active {
+  border-color: color-mix(in srgb, var(--accent) 68%, var(--line));
+  background: color-mix(in srgb, var(--accent) 18%, var(--panel-solid));
+}
+
+.language-pack-check {
+  width: 15px;
+  height: 15px;
+  border-radius: 5px;
+  border: 1px solid color-mix(in srgb, var(--muted) 64%, transparent);
+  background: color-mix(in srgb, var(--bg) 65%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+}
+
+.language-pack-option.active .language-pack-check {
+  border-color: color-mix(in srgb, var(--accent) 86%, white);
+  background: var(--accent);
+}
+
+.language-pack-option strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.language-pack-option small {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.language-pack-empty {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  border: 1px dashed color-mix(in srgb, var(--line) 86%, transparent);
+  border-radius: 13px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--bg) 42%, transparent);
+  font-size: 12px;
+}
+
+.language-generator-box {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+}
+
+.language-generator-box strong {
+  color: var(--text-strong);
+  font-size: 13px;
+}
+
+.language-generator-box p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.language-generator-actions {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.language-generator-actions input {
+  min-width: 0;
+  height: 38px;
+}
+
+.language-generator-actions .primary-button,
+.language-generator-actions .soft-button {
+  min-height: 38px;
+  white-space: nowrap;
+}
+
+.language-generator-actions .primary-button:disabled {
+  cursor: wait;
+  opacity: .68;
+}
+
+.language-generator-status {
+  margin: 0 !important;
+  color: color-mix(in srgb, var(--accent) 72%, var(--text-strong));
+}
+
+.language-generator-status.error {
+  color: #fca5a5;
+}
+
+@media (max-width: 980px) {
+  .language-pack-heading {
+    display: grid;
+  }
+
+  .language-pack-heading small {
+    max-width: none;
+    text-align: left;
+  }
+
+  .language-generator-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Appearance language layout fix: keep core appearance controls on top so the language generator never pushes theme/animation into an awkward trailing row. */
+/* 外观语言布局修复：核心外观控件固定在上方，避免语言生成器把主题/动画挤到卡片底部形成奇怪位置。 */
+.appearance-basic-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  align-items: stretch;
+}
+
+.appearance-basic-grid .control-row {
+  min-height: 104px;
+  display: grid;
+  grid-template-columns: 1fr !important;
+  align-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--line) 86%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--surface) 58%, transparent);
+}
+
+.appearance-basic-grid .segmented {
+  justify-self: stretch;
+  width: 100%;
+}
+
+.appearance-basic-grid .segmented button {
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+.language-extension-panel {
+  margin-top: 2px;
+}
+
+.language-pack-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.language-pack-option {
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  min-height: 54px;
+}
+
+.language-pack-main {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.language-pack-main small {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: none;
+}
+
+.language-pack-option > em {
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--bg) 56%, transparent);
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.language-pack-option.active > em {
+  color: #fff;
+  background: color-mix(in srgb, var(--accent) 74%, #111827);
+}
+
+.language-generator-box {
+  grid-template-columns: minmax(220px, .95fr) minmax(320px, 1.35fr);
+  align-items: end;
+}
+
+.language-generator-box > div:first-child {
+  min-width: 0;
+}
+
+.language-generator-status {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 980px) {
+  .appearance-basic-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .appearance-basic-grid .control-row {
+    min-height: auto;
+  }
+
+  .language-generator-box {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 语言设置区域必须在机器翻译产生长文本时仍保持稳定，因此这里强制外观卡片使用单列承载三个内部控件组。 */
+/* The language settings area must stay stable even with long machine-translated labels, so the appearance card is forced to one column that contains the three internal control groups. */
+.appearance-controls {
+  grid-template-columns: 1fr !important;
+  align-items: stretch;
+}
+
+/* 三个核心外观设置独立占满一行，是为了避免扩展语言生成器把主题和动画控件挤成截图中的窄列重叠。 */
+/* The three core appearance settings span a full row so the language generator cannot squeeze theme and animation controls into the narrow overlapping layout shown in the screenshot. */
+.appearance-basic-grid {
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(3, minmax(190px, 1fr));
+  width: 100%;
+}
+
+.appearance-basic-grid .control-row {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.appearance-basic-grid .segmented {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.appearance-basic-grid .segmented button {
+  min-width: 0;
+  padding-inline: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 扩展语言需要提示“非官方翻译”，这样用户不会把免费 API 输出误认为人工维护的正式语言包。 */
+/* Extra languages need an unofficial-translation notice so users do not mistake free API output for a manually maintained official locale. */
+.language-pack-warning {
+  margin: -4px 0 0;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--coral) 26%, var(--line));
+  border-radius: 12px;
+  color: color-mix(in srgb, var(--coral) 72%, var(--text));
+  background: color-mix(in srgb, var(--coral) 8%, transparent);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* 生成语言可能很多，因此扩展语言改为紧凑卡片并限制高度，避免设置页被长语言列表撑得臃肿。 */
+/* Many generated languages are possible, so extra languages use compact cards with a height cap to keep the settings page from becoming bulky. */
+.language-pack-grid {
+  grid-template-columns: repeat(auto-fill, minmax(145px, 1fr)) !important;
+  max-height: 118px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.language-pack-option {
+  min-height: 38px !important;
+  grid-template-columns: 14px minmax(0, 1fr) auto !important;
+  gap: 7px !important;
+  padding: 7px 9px !important;
+  border-radius: 12px !important;
+}
+
+.language-pack-check {
+  width: 13px;
+  height: 13px;
+  border-radius: 4px;
+}
+
+.language-pack-option strong {
+  font-size: 12px;
+}
+
+.language-pack-option small {
+  font-size: 10px;
+}
+
+.language-pack-option > em {
+  max-width: 56px;
+  padding: 3px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10px;
+}
+
+/* 语言生成器改回纵向信息流，是为了让说明、输入框和按钮各自拥有足够空间，不再挤压相邻设置项。 */
+/* The language generator returns to a vertical flow so description, input, and buttons have enough room without pushing neighboring settings. */
+.language-generator-box {
+  grid-template-columns: 1fr !important;
+  align-items: stretch !important;
+}
+
+.language-generator-actions {
+  grid-template-columns: minmax(180px, 1fr) auto auto;
+}
+
+.language-generator-folder {
+  margin: -2px 0 0 !important;
+  color: var(--muted-soft) !important;
+  font-family: var(--mono);
+  font-size: 11px !important;
+  overflow-wrap: anywhere;
+}
+
+/* 逐条调用翻译 API 会持续数分钟，进度条能把后台进度明确反馈给用户，降低误判为卡死的概率。 */
+/* Calling the translation API item by item can take minutes, and this progress bar makes backend progress visible so users do not assume the app is frozen. */
+.language-progress {
+  display: grid;
+  gap: 7px;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel-solid));
+}
+
+.language-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.language-progress-meta b {
+  color: var(--text-strong);
+  font-family: var(--mono);
+}
+
+.language-progress-track {
+  display: block;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg) 58%, transparent);
+}
+
+.language-progress-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--blue), var(--coral));
+  transition: width .18s ease;
+}
+
+@media (max-width: 980px) {
+  .appearance-basic-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .language-generator-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 语言扩展模块最终布局修复：机器翻译产生的长文本必须被限制在卡片内部，避免覆盖主题、动画等核心设置。 */
+/* Final layout fix for the language extension module: long machine-translated strings must stay inside their cards instead of overlapping theme or animation controls. */
+.appearance-controls {
+  overflow: visible !important;
+}
+
+.appearance-basic-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 12px !important;
+}
+
+.appearance-basic-grid .control-row {
+  min-width: 0 !important;
+  min-height: 92px !important;
+  padding: 13px 16px !important;
+  overflow: hidden !important;
+}
+
+.appearance-basic-grid .setting-name,
+.appearance-basic-grid .setting-name > span {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.appearance-basic-grid .segmented {
+  display: grid !important;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  justify-self: stretch !important;
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+.appearance-basic-grid .segmented button {
+  min-width: 0 !important;
+  padding-inline: 7px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.language-extension-panel {
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+
+.language-pack-heading {
+  align-items: center !important;
+}
+
+.language-pack-heading small {
+  min-width: 0 !important;
+  max-width: min(620px, 62%) !important;
+  overflow-wrap: anywhere !important;
+}
+
+/* 非官方翻译提醒是面向普通用户的轻量提示，所以采用紧凑提示条，避免像开发者警告或错误横幅一样抢占视觉重心。 */
+/* The unofficial-translation notice is a lightweight user-facing hint, so it stays compact instead of looking like a developer warning or error banner. */
+.language-pack-warning {
+  width: fit-content !important;
+  max-width: min(760px, 100%) !important;
+  margin: -2px 0 2px !important;
+  padding: 7px 10px !important;
+  border-color: color-mix(in srgb, var(--accent) 20%, var(--line)) !important;
+  color: var(--muted) !important;
+  background: color-mix(in srgb, var(--surface) 48%, transparent) !important;
+  line-height: 1.42 !important;
+  overflow-wrap: anywhere !important;
+}
+
+.language-pack-grid {
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)) !important;
+  max-height: 126px !important;
+  gap: 7px !important;
+}
+
+.language-pack-option {
+  position: relative;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 30px !important;
+  align-items: center !important;
+  min-width: 0 !important;
+  min-height: 42px !important;
+  gap: 6px !important;
+  padding: 5px 6px 5px 8px !important;
+}
+
+.language-pack-select {
+  min-width: 0 !important;
+  min-height: 30px !important;
+  display: grid !important;
+  grid-template-columns: 13px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 0 !important;
+  color: inherit;
+  background: transparent !important;
+  text-align: left;
+}
+
+.language-pack-select:hover {
+  background: transparent !important;
+}
+
+.language-pack-delete {
+  width: 28px !important;
+  height: 28px !important;
+  min-height: 28px !important;
+  display: inline-grid !important;
+  place-items: center !important;
+  padding: 0 !important;
+  border: 1px solid color-mix(in srgb, var(--coral) 28%, var(--line)) !important;
+  border-radius: 9px !important;
+  color: color-mix(in srgb, var(--coral) 82%, var(--muted)) !important;
+  background: color-mix(in srgb, var(--coral) 8%, transparent) !important;
+}
+
+.language-pack-delete:hover {
+  color: #fff !important;
+  background: color-mix(in srgb, var(--coral) 72%, #111827) !important;
+}
+
+.language-pack-option > em,
+.language-pack-select > em {
+  max-width: 52px !important;
+  padding: 3px 6px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.language-generator-box {
+  min-width: 0 !important;
+}
+
+.language-generator-actions {
+  grid-template-columns: minmax(220px, 1fr) auto auto !important;
+  min-width: 0 !important;
+}
+
+.language-generator-actions input {
+  min-width: 0 !important;
+}
+
+.language-generator-folder {
+  max-width: 100% !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+@media (max-width: 1080px) {
+  .appearance-basic-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .language-pack-heading,
+  .language-generator-actions {
+    grid-template-columns: 1fr !important;
+    display: grid !important;
+  }
+
+  .language-pack-heading small {
+    max-width: none !important;
+    text-align: left !important;
+  }
+}
+
+/* 语言模块的提示文本应保持短句完整换行，避免中文在窄容器里出现最后一行只剩一个字的割裂感。 */
+/* Language hints should wrap as balanced short sentences so Chinese text does not leave a single trailing character on the last line. */
+.language-pack-heading {
+  grid-template-columns: minmax(0, auto) minmax(220px, max-content) !important;
+  align-items: center !important;
+}
+
+.language-pack-heading small {
+  max-width: 360px !important;
+  text-align: left !important;
+  word-break: keep-all !important;
+  overflow-wrap: normal !important;
+  text-wrap: balance;
+}
+
+/* 翻译 API 设置被收纳进语言生成器内部，是为了允许高级用户替换接口，同时不把主要语言切换控件挤乱。 */
+/* Translation API settings live inside the generator so advanced users can replace the endpoint without disturbing the main language controls. */
+.translation-api-settings {
+  display: grid;
+  grid-template-columns: minmax(180px, .85fr) minmax(260px, 1.15fr);
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg) 34%, transparent);
+}
+
+.translation-api-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.translation-api-copy strong {
+  font-size: 12px !important;
+}
+
+.translation-api-copy small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.translation-api-actions {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.translation-api-actions input {
+  min-width: 0;
+  height: 36px;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.translation-api-actions .soft-button {
+  min-height: 36px;
+  white-space: nowrap;
+}
+
+.reset-api-button {
+  display: inline-flex !important;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (max-width: 1080px) {
+  .language-pack-heading,
+  .translation-api-settings,
+  .translation-api-actions {
+    grid-template-columns: 1fr !important;
+  }
+
+  .language-pack-heading small {
+    max-width: none !important;
+  }
+}
+
+/* 翻译服务改成选项型，是为了让每个 API 走对应适配器，而不是让用户输入无法保证兼容的裸 URL。 */
+/* Translation service selection uses adapted options so each API can use its own adapter instead of asking users for an unsafe raw URL. */
+.translation-provider-actions {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.translation-provider-actions .segmented {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+}
+
+.translation-provider-actions .segmented button {
+  min-width: 0;
+  overflow: hidden;
+  padding-inline: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 扩展语言提示应像轻量说明而不是横幅警告，因此限制宽度并优先按句号换行，避免末尾孤字。 */
+/* The extra-language hint should read like a compact note rather than a banner, so width is constrained and wrapping avoids orphan characters. */
+.language-pack-heading small {
+  max-width: 340px !important;
+  line-height: 1.45 !important;
+  word-break: keep-all !important;
+  overflow-wrap: normal !important;
+  text-wrap: pretty;
+}
+
+@media (max-width: 1080px) {
+  .translation-provider-actions {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* 翻译服务改为下拉列表，是为了让后续新增 Provider 时不会把选项横向撑爆设置面板。 */
+/* Translation providers use a dropdown so future services do not stretch the settings panel horizontally. */
+.translation-provider-actions {
+  grid-template-columns: minmax(240px, 1fr) auto !important;
+}
+
+.translation-provider-select-wrap {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel-solid) 82%, transparent);
+}
+
+.translation-provider-select-wrap span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.translation-provider-select {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 0 32px 0 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+  border-radius: 10px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg) 48%, transparent);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  outline: none;
+}
+
+.translation-provider-select:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 76%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.translation-provider-select:disabled {
+  opacity: .62;
+}
+
+@media (max-width: 1080px) {
+  .translation-provider-actions,
+  .translation-provider-select-wrap {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* 翻译服务下拉改为自绘组件，是为了避免系统原生下拉菜单破坏 ClipAnchor 的统一视觉语言。 */
+/* The translation provider dropdown is custom drawn so native system menus do not break ClipAnchor's unified visual language. */
+.translation-provider-actions {
+  grid-template-columns: minmax(240px, .9fr) minmax(300px, 1.1fr) auto !important;
+  align-items: stretch !important;
+  gap: 10px !important;
+}
+
+.translation-provider-select-wrap,
+.translation-api-key-wrap {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--panel-solid) 82%, transparent);
+}
+
+.translation-api-key-wrap {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.translation-provider-select-wrap > span,
+.translation-api-key-wrap > span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.codex-dropdown {
+  position: relative;
+  min-width: 0;
+}
+
+.codex-dropdown.open {
+  z-index: 90;
+}
+
+.codex-dropdown-button {
+  width: 100%;
+  min-height: 38px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 86%, transparent);
+  border-radius: 12px;
+  color: var(--text-strong);
+  background: color-mix(in srgb, var(--surface) 54%, var(--bg));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 7%, transparent);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 850;
+  text-align: left;
+  cursor: pointer;
+}
+
+.codex-dropdown-button:hover,
+.codex-dropdown.open .codex-dropdown-button {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--line));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+
+.codex-dropdown-button:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 82%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.codex-dropdown-button:disabled {
+  cursor: not-allowed;
+  opacity: .62;
+}
+
+.codex-dropdown-button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codex-dropdown-button i {
+  color: var(--muted);
+  font-style: normal;
+  transition: transform .16s ease;
+}
+
+.codex-dropdown.open .codex-dropdown-button i {
+  transform: rotate(180deg);
+}
+
+.codex-dropdown-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--panel-solid) 98%, var(--bg));
+  box-shadow: 0 18px 50px color-mix(in srgb, black 30%, transparent), inset 0 1px 0 color-mix(in srgb, white 7%, transparent);
+}
+
+.codex-dropdown-menu button {
+  min-height: 34px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 10px;
+  color: var(--text);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 760;
+  text-align: left;
+}
+
+.codex-dropdown-menu button:hover,
+.codex-dropdown-menu button.selected {
+  color: var(--text-strong);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.codex-dropdown-menu button em {
+  color: var(--accent);
+  font-style: normal;
+  font-weight: 900;
+}
+
+.translation-api-key-wrap input {
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  padding-inline: 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 86%, transparent);
+  border-radius: 12px;
+  color: var(--text-strong);
+  background: color-mix(in srgb, var(--surface) 48%, var(--bg));
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.translation-api-key-wrap input:focus {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.clear-api-key-button,
+.reset-api-button {
+  min-height: 38px !important;
+  white-space: nowrap;
+}
+
+/* 非生成状态不再显示语言生成日志，是为了避免把偏开发者的过程提示放进用户界面。 */
+/* Non-generating language logs are not shown so developer-oriented process messages stay out of the user interface. */
+.language-generator-status {
+  display: none !important;
+}
+
+@media (max-width: 1180px) {
+  .translation-provider-actions {
+    grid-template-columns: 1fr !important;
+  }
+
+  .translation-provider-select-wrap,
+  .translation-api-key-wrap {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* 翻译服务设置需要独立占满一行，否则服务商、密钥与重置按钮会被压到右侧形成截图中的拥挤空洞。 */
+/* Translation service settings need a full-width row, otherwise provider, key, and reset controls are squeezed to the right and create the crowded empty layout shown in the screenshot. */
+.translation-api-settings {
+  grid-template-columns: 1fr !important;
+  align-items: stretch !important;
+  gap: 10px !important;
+  padding: 12px !important;
+  overflow: visible !important;
+}
+
+.translation-api-copy {
+  display: grid !important;
+  grid-template-columns: auto minmax(0, 1fr) !important;
+  align-items: baseline !important;
+  gap: 10px 14px !important;
+}
+
+.translation-api-copy small {
+  max-width: 620px !important;
+  overflow-wrap: break-word !important;
+}
+
+/* 服务商下拉、API Key 与重置按钮共享同一条完整表单行，保证浅色/深色主题下都不会互相遮挡。 */
+/* Provider dropdown, API key, and reset button share one full form row so they do not overlap in either light or dark themes. */
+.translation-provider-actions {
+  width: 100% !important;
+  display: grid !important;
+  grid-template-columns: minmax(250px, .72fr) minmax(320px, 1fr) auto !important;
+  align-items: stretch !important;
+  gap: 10px !important;
+}
+
+.translation-provider-select-wrap,
+.translation-api-key-wrap {
+  width: 100% !important;
+  min-height: 56px !important;
+  box-sizing: border-box !important;
+}
+
+.translation-provider-select-wrap {
+  grid-template-columns: auto minmax(180px, 1fr) !important;
+}
+
+.translation-api-key-wrap {
+  grid-template-columns: auto minmax(190px, 1fr) auto !important;
+}
+
+.translation-provider-select-wrap > span,
+.translation-api-key-wrap > span {
+  min-width: 48px !important;
+}
+
+.codex-dropdown {
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+.codex-dropdown-button {
+  min-height: 40px !important;
+  padding-inline: 14px !important;
+}
+
+.codex-dropdown-menu {
+  z-index: 300 !important;
+  min-width: 100% !important;
+  width: max-content !important;
+  max-width: min(280px, calc(100vw - 80px)) !important;
+  color: var(--text) !important;
+}
+
+.codex-dropdown-menu button {
+  min-width: 180px !important;
+  white-space: nowrap !important;
+}
+
+.translation-api-key-wrap input {
+  min-width: 0 !important;
+}
+
+.clear-api-key-button {
+  min-width: 74px !important;
+  padding-inline: 10px !important;
+}
+
+.reset-api-button {
+  min-width: 112px !important;
+  padding-inline: 12px !important;
+}
+
+@media (max-width: 1250px) {
+  .translation-provider-actions {
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  .reset-api-button {
+    grid-column: 1 / -1 !important;
+    justify-self: end !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .translation-api-copy,
+  .translation-provider-actions,
+  .translation-provider-select-wrap,
+  .translation-api-key-wrap {
+    grid-template-columns: 1fr !important;
+  }
+
+  .reset-api-button {
+    justify-self: stretch !important;
+  }
+}
+
+/* 扩展语言工具区按“输入、生成、重置”排列，是为了与用户的操作顺序一致，并避免无用途的系统语言按钮占位。 */
+/* The extra-language action row follows input, generate, then reset so it matches the user's workflow without reserving space for an unused system-language button. */
+.translation-provider-actions {
+  grid-template-columns: minmax(250px, .78fr) minmax(320px, 1fr) !important;
+}
+
+.language-generator-actions {
+  grid-template-columns: minmax(220px, 1fr) minmax(112px, auto) minmax(112px, auto) !important;
+}
+
+.language-generator-actions .primary-button,
+.language-generator-actions .reset-api-button {
+  min-width: 112px !important;
+  justify-content: center !important;
+}
+
+/* 每个语言包把重新生成放在删除左侧，并为损坏状态保留紧凑警告标记，方便用户就地修复手动放入的文件。 */
+/* Each language pack places regenerate before delete and keeps a compact damage indicator so manually supplied files can be repaired in place. */
+.language-pack-option {
+  grid-template-columns: minmax(0, 1fr) auto !important;
+}
+
+.language-pack-actions {
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 28px;
+  gap: 5px;
+  align-items: center;
+}
+
+.language-pack-refresh,
+.language-pack-delete {
+  width: 28px !important;
+  height: 28px !important;
+  min-height: 28px !important;
+  display: inline-grid !important;
+  place-items: center !important;
+  padding: 0 !important;
+  border-radius: 9px !important;
+}
+
+.language-pack-refresh {
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line)) !important;
+  color: color-mix(in srgb, var(--accent) 86%, var(--muted)) !important;
+  background: color-mix(in srgb, var(--accent) 8%, transparent) !important;
+}
+
+.language-pack-refresh:hover:not(:disabled) {
+  color: #fff !important;
+  background: color-mix(in srgb, var(--accent) 72%, #111827) !important;
+}
+
+.language-pack-refresh:disabled,
+.language-pack-delete:disabled {
+  cursor: not-allowed !important;
+  opacity: .48 !important;
+}
+
+.language-pack-main small {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+}
+
+.language-pack-main small svg {
+  flex: 0 0 auto;
+  color: var(--coral);
+}
+
+.language-pack-option.has-warning {
+  border-color: color-mix(in srgb, var(--coral) 42%, var(--line)) !important;
+  background: color-mix(in srgb, var(--coral) 5%, var(--panel-solid)) !important;
+}
+
+.translation-api-key-wrap input:disabled {
+  cursor: not-allowed;
+  opacity: .66;
+  color: var(--muted);
+}
+
+@media (max-width: 1250px) {
+  .translation-provider-actions {
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  .language-generator-actions {
+    grid-template-columns: minmax(0, 1fr) auto auto !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .translation-provider-actions,
+  .language-generator-actions {
+    grid-template-columns: 1fr !important;
+  }
+
+  .language-generator-actions .primary-button,
+  .language-generator-actions .reset-api-button {
+    width: 100% !important;
+  }
+}
+
+/* 重置按钮已移动到生成行，必须覆盖旧服务商行遗留的跨列规则，避免中等窗口宽度下独占整行。 */
+/* The reset button now lives in the generator row, so legacy provider-row spanning rules are overridden to keep it from taking a full row at medium widths. */
+.language-generator-actions .reset-api-button {
+  grid-column: auto !important;
+  justify-self: stretch !important;
+}
+
+/* 损坏语言包确认卡使用克制的珊瑚色警告图标，是为了强调文件问题，同时不破坏统一的自绘弹窗风格。 */
+/* Damaged-language confirmations use a restrained coral warning icon to emphasize the file issue without breaking the unified custom-dialog style. */
+.settings-dialog-icon.warning {
+  color: var(--coral) !important;
+  border-color: color-mix(in srgb, var(--coral) 34%, var(--line)) !important;
+  background: color-mix(in srgb, var(--coral) 10%, transparent) !important;
+}
+
+/* 扩展语言选择区采用宽卡片和清晰的两级信息层次，是为了让语言名称、代号与状态始终完整可读，不再被刷新/删除按钮压缩。 */
+/* The extra-language selector uses wide cards and a clear two-level hierarchy so names, codes, and states remain readable instead of being squeezed by refresh/delete actions. */
+.language-pack-grid {
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)) !important;
+  max-height: 224px !important;
+  gap: 10px !important;
+  padding: 2px 5px 2px 1px !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+}
+
+.language-pack-option {
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  min-width: 0 !important;
+  min-height: 68px !important;
+  gap: 10px !important;
+  padding: 8px 9px 8px 11px !important;
+  border-radius: 14px !important;
+  overflow: hidden !important;
+}
+
+.language-pack-select {
+  min-width: 0 !important;
+  min-height: 50px !important;
+  display: grid !important;
+  grid-template-columns: 16px minmax(0, 1fr) !important;
+  align-items: center !important;
+  gap: 10px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  color: inherit !important;
+  background: transparent !important;
+  text-align: left !important;
+}
+
+.language-pack-select:focus-visible {
+  outline: none !important;
+}
+
+.language-pack-check {
+  width: 16px !important;
+  height: 16px !important;
+  align-self: center !important;
+  border-radius: 5px !important;
+}
+
+.language-pack-main {
+  min-width: 0 !important;
+  display: grid !important;
+  gap: 6px !important;
+}
+
+.language-pack-title-row {
+  min-width: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+.language-pack-title-row strong,
+.language-pack-option strong {
+  min-width: 0 !important;
+  flex: 1 1 auto !important;
+  overflow: visible !important;
+  color: var(--text-strong) !important;
+  font-size: 13px !important;
+  line-height: 1.35 !important;
+  text-overflow: clip !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+}
+
+.language-pack-code {
+  flex: 0 0 auto !important;
+  max-width: none !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  padding: 3px 7px !important;
+  border: 1px solid color-mix(in srgb, var(--line) 86%, transparent) !important;
+  border-radius: 999px !important;
+  color: var(--muted) !important;
+  background: color-mix(in srgb, var(--bg) 52%, transparent) !important;
+  font-family: var(--mono) !important;
+  font-size: 10px !important;
+  font-style: normal !important;
+  line-height: 1.2 !important;
+  text-transform: none !important;
+  white-space: nowrap !important;
+}
+
+.language-pack-code svg {
+  flex: 0 0 auto !important;
+  color: var(--coral) !important;
+}
+
+.language-pack-state {
+  min-width: 0 !important;
+  color: var(--muted) !important;
+  font-size: 11px !important;
+  font-weight: 760 !important;
+  line-height: 1.35 !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+}
+
+.language-pack-option.active .language-pack-state {
+  color: color-mix(in srgb, var(--accent) 82%, var(--text-strong)) !important;
+}
+
+.language-pack-actions {
+  flex: 0 0 auto !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+}
+
+.language-pack-refresh,
+.language-pack-delete {
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
+  min-height: 32px !important;
+  border-radius: 10px !important;
+}
+
+/* 中等宽度下改为单列，是为了优先保证每个语言名称完整显示，而不是继续缩小卡片。 */
+/* Medium-width layouts switch to one column so preserving complete language names takes priority over shrinking the cards. */
+@media (max-width: 1180px) {
+  .language-pack-grid {
+    grid-template-columns: 1fr !important;
+    max-height: 246px !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .language-pack-option {
+    grid-template-columns: 1fr !important;
+  }
+
+  .language-pack-actions {
+    justify-self: end !important;
+  }
+}
+
+
+
+/* 外观设置使用容器级自适应网格，是为了让翻译后的长标签按真实可用宽度重排，而不是依赖整个窗口宽度后继续被省略。 */
+/* Appearance settings use a container-aware adaptive grid so translated labels reflow against the actual available width instead of being truncated by viewport-only breakpoints. */
+.appearance-basic-grid {
+  container-name: appearance-settings;
+  container-type: inline-size;
+  grid-template-columns: repeat(12, minmax(0, 1fr)) !important;
+  align-items: stretch !important;
+}
+
+.appearance-basic-grid .appearance-language-card {
+  grid-column: span 5;
+}
+
+.appearance-basic-grid .appearance-theme-card {
+  grid-column: span 4;
+}
+
+.appearance-basic-grid .appearance-animation-card {
+  grid-column: span 3;
+}
+
+/* 分段按钮允许自然换行，是为了完整显示日语、德语、法语等较长的常用界面词，而不是用省略号隐藏关键选项。 */
+/* Segmented labels may wrap naturally so common longer Japanese, German, and French UI terms remain fully visible instead of hiding key choices behind ellipses. */
+.appearance-basic-grid .segmented {
+  align-items: stretch !important;
+  overflow: visible !important;
+}
+
+.appearance-basic-grid .segmented button {
+  min-height: 40px !important;
+  height: auto !important;
+  padding: 7px 9px !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+  word-break: normal !important;
+  line-height: 1.22 !important;
+  text-align: center !important;
+}
+
+.language-segmented {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  grid-auto-flow: row !important;
+  grid-auto-columns: initial !important;
+}
+
+/* 可用宽度不足时，语言卡片先独占整行，主题与动画保持同一行，从而统一卡片高度并优先保障语言名称完整。 */
+/* When space narrows, the language card takes a full row first while theme and animation share the next row, keeping row heights consistent and prioritizing complete language labels. */
+@container appearance-settings (max-width: 920px) {
+  .appearance-basic-grid .appearance-language-card {
+    grid-column: 1 / -1;
+  }
+
+  .appearance-basic-grid .appearance-theme-card,
+  .appearance-basic-grid .appearance-animation-card {
+    grid-column: span 6;
+  }
+}
+
+/* 极窄内容区改为逐项单列，是为了避免任何语言的控件互相挤压，同时保留完整点击区域。 */
+/* Very narrow content areas stack every control so no language can squeeze neighboring controls and every option keeps a complete hit target. */
+@container appearance-settings (max-width: 560px) {
+  .appearance-basic-grid .appearance-theme-card,
+  .appearance-basic-grid .appearance-animation-card {
+    grid-column: 1 / -1;
+  }
+}
+
+/* 旧版 WebView 若不支持容器查询，则按窗口宽度提供等价退化布局，确保核心语言选择仍不会被压缩。 */
+/* Older WebViews without container-query support receive an equivalent viewport fallback so the core language selector still cannot collapse. */
+@supports not (container-type: inline-size) {
+  .appearance-basic-grid {
+    grid-template-columns: minmax(360px, 1.35fr) repeat(2, minmax(240px, 1fr)) !important;
+  }
+
+  @media (max-width: 1180px) {
+    .appearance-basic-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    }
+
+    .appearance-basic-grid .appearance-language-card {
+      grid-column: 1 / -1;
+    }
+  }
+
+  @media (max-width: 760px) {
+    .appearance-basic-grid {
+      grid-template-columns: 1fr !important;
+    }
+
+    .appearance-basic-grid .appearance-theme-card,
+    .appearance-basic-grid .appearance-animation-card {
+      grid-column: 1 / -1;
+    }
+  }
+}
+
+/* 外观卡片标题同样允许换行，是为了让“语言”“主题”“动画模式”等词在长文本语言中保持完整，而不只修复按钮本身。 */
+/* Appearance-card headings may wrap as well so labels such as Language, Theme, and Animation mode stay complete in verbose locales instead of fixing only the buttons. */
+.appearance-basic-grid .control-row {
+  overflow: visible !important;
+}
+
+.appearance-basic-grid .setting-name,
+.appearance-basic-grid .setting-name > span {
+  max-width: 100% !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+  line-height: 1.3 !important;
+}
+
+/* 设置页与剪贴板页共享完整内容宽度，是为了在全屏时利用可用空间并消除居中的网页式大留白。 */
+/* Settings and clipboard pages share the full content width so fullscreen layouts use available space and avoid centered webpage-like gutters. */
+.settings-scroll > .settings-grid,
+.settings-scroll > .refined-settings-grid,
+.settings-scroll > .compact-settings-grid {
+  width: 100% !important;
+  max-width: none !important;
+  margin-inline: 0 !important;
+}
+
+/* 滚动条只在内容真实滚动后的短暂窗口内显示；悬停本身不再触发显示。 */
+/* Scrollbars appear only briefly after content actually scrolls; hovering alone no longer reveals them. */
+.scroll-area,
+.scroll-area:hover {
+  scrollbar-width: thin !important;
+  scrollbar-color: transparent transparent !important;
+}
+.scroll-area::-webkit-scrollbar-thumb,
+.scroll-area:hover::-webkit-scrollbar-thumb {
+  background: transparent !important;
+}
+.scroll-area.is-scrolling {
+  scrollbar-color: var(--scroll-thumb) transparent !important;
+}
+.scroll-area.is-scrolling::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb) !important;
+}
+.clipanchor-popup-body .popup-file-list {
+  overflow-y: auto !important;
+  scrollbar-color: transparent transparent !important;
+}
+.clipanchor-popup-body .popup-file-list:hover::-webkit-scrollbar-thumb {
+  background: transparent !important;
+}
+.clipanchor-popup-body .popup-file-list.is-scrolling {
+  scrollbar-color: color-mix(in srgb, var(--blue) 45%, transparent) transparent !important;
+}
+.clipanchor-popup-body .popup-file-list.is-scrolling::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--blue) 45%, transparent) !important;
+}
+
+/* 更新提醒与损坏提醒使用不同的颜色和图形，是为了让用户一眼区分“可继续使用并增量更新”和“无法安全切换”。 */
+/* Update and damage states use distinct colors and symbols so users can immediately distinguish “usable with incremental update” from “unsafe to switch.” */
+.language-pack-option.has-update {
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--line)) !important;
+}
+.language-pack-option.has-error {
+  border-color: color-mix(in srgb, var(--coral) 54%, var(--line)) !important;
+}
+.language-pack-update-icon {
+  color: var(--accent) !important;
+}
+.language-pack-error-icon {
+  color: var(--coral) !important;
+}
+.language-pack-option.has-update .language-pack-state {
+  color: color-mix(in srgb, var(--accent) 82%, var(--text-strong)) !important;
+}
+.language-pack-option.has-error .language-pack-state {
+  color: color-mix(in srgb, var(--coral) 82%, var(--text-strong)) !important;
+}
+.settings-dialog-icon.update {
+  color: var(--accent) !important;
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line)) !important;
+  background: color-mix(in srgb, var(--accent) 12%, transparent) !important;
+}
+
+
+/* 设置页卡片直接占满主内容工作区，是为了在宽屏和全屏状态下保持与剪贴板、收藏夹一致的原生应用密度。 */
+/* Settings cards fill the main workspace so widescreen and fullscreen layouts keep the same native-app density as Clipboard and Favorites. */
+.settings-scroll {
+  padding-inline: 18px !important;
+}
+.settings-scroll > .settings-grid,
+.settings-scroll .settings-card.wide,
+.settings-scroll .appearance-controls,
+.settings-scroll .language-extension-panel {
+  min-width: 0 !important;
+  width: 100% !important;
+}
+.compact-settings-grid {
+  max-width: none !important;
+  margin: 0 !important;
+}
+
+/* 增量更新结果使用轻量内联状态，不再弹出网页式通知，是为了让生成流程的反馈留在当前原生设置卡片内。 */
+/* Incremental-update results use a lightweight inline status instead of webpage-like notices, keeping generation feedback inside the native settings card. */
+.language-generation-result {
+  margin: 8px 0 0 !important;
+  padding: 9px 11px !important;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line)) !important;
+  border-radius: 11px !important;
+  color: color-mix(in srgb, var(--accent) 78%, var(--text-strong)) !important;
+  background: color-mix(in srgb, var(--accent) 7%, transparent) !important;
+  font-size: 12px !important;
+  line-height: 1.45 !important;
+}
+.language-generation-result.error {
+  border-color: color-mix(in srgb, var(--coral) 38%, var(--line)) !important;
+  color: color-mix(in srgb, var(--coral) 82%, var(--text-strong)) !important;
+  background: color-mix(in srgb, var(--coral) 8%, transparent) !important;
+}
+.language-progress.without-track {
+  padding-block: 9px !important;
+}
+
+/* 扩展语言列表使用与主滚动区相同的“滚动时显示”规则，避免鼠标只是移入卡片就出现滚动条。 */
+/* The extra-language list follows the same scroll-only visibility rule as the main content, preventing a scrollbar from appearing merely on pointer entry. */
+.language-pack-grid.scroll-area,
+.language-pack-grid.scroll-area:hover {
+  scrollbar-color: transparent transparent !important;
+}
+.language-pack-grid.scroll-area.is-scrolling {
+  scrollbar-color: var(--scroll-thumb) transparent !important;
 }

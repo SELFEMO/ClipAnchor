@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { BadgeCheck, Clock3, Database, Download, FolderOpen, HelpCircle, Keyboard, MapPinned, Minus, Palette, Plus, Power, RefreshCw, RotateCcw, Trash2, Upload } from 'lucide-react';
+import { BadgeCheck, Clock3, Database, Download, FolderOpen, HelpCircle, Keyboard, MapPinned, Minus, Palette, Plus, Power, RefreshCw, RotateCcw, Trash2, TriangleAlert, Upload } from 'lucide-react';
 import { api } from '../api.js';
+import { detectSystemLanguageCode, getReferenceMessages, inferLanguageLabel, listLanguageChoices, normalizeLocaleCode } from '../i18n.js';
 import { captureShortcutValue, formatShortcutForDisplay, normalizeShortcutForStorage } from '../shortcutDisplay.js';
+import { useTransientScrollbar } from '../useTransientScrollbar.js';
 
 function Switch({ checked, onChange }) {
   return <button className={`switch ${checked ? 'on' : ''}`} onClick={() => onChange(!checked)}><span /></button>;
@@ -14,12 +16,71 @@ function captureShortcut(event, setter) {
   if (shortcut) setter(shortcut);
 }
 
-function Segmented({ value, options, onChange }) {
+function Segmented({ value, options, onChange, className = '' }) {
+  const classes = ['segmented', className].filter(Boolean).join(' ');
   return (
-    <div className="segmented">
+    <div className={classes}>
       {options.map((option) => (
-        <button key={option.value} className={value === option.value ? 'active' : ''} onClick={() => onChange(option.value)}>{option.label}</button>
+        <button
+          key={option.value}
+          type="button"
+          className={value === option.value ? 'active' : ''}
+          title={option.label}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
       ))}
+    </div>
+  );
+}
+
+function DropdownSelect({ value, options, onChange, disabled = false, ariaLabel = '' }) {
+  const [open, setOpen] = useState(false);
+  const current = options.find((option) => option.value === value) || options[0];
+
+  function choose(optionValue) {
+    setOpen(false);
+    if (optionValue !== value) onChange(optionValue);
+  }
+
+  return (
+    <div
+      className={`codex-dropdown ${open ? 'open' : ''}`}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+      }}
+    >
+      <button
+        type="button"
+        className="codex-dropdown-button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={ariaLabel}
+        disabled={disabled}
+        onClick={() => setOpen((next) => !next)}
+      >
+        <span>{current?.label || value}</span>
+        <i aria-hidden="true">⌄</i>
+      </button>
+      {open ? (
+        <div className="codex-dropdown-menu" role="listbox">
+          {options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="option"
+              aria-selected={option.value === value}
+              className={option.value === value ? 'selected' : ''}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => choose(option.value)}
+            >
+              <span>{option.label}</span>
+              {option.value === value ? <em>✓</em> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -240,11 +301,23 @@ const shortcutOrder = [
 ];
 
 function normalizeSettings(value) {
+  const provider = normalizeTranslationProvider(value?.translation_api_provider, value?.translation_api_url);
+  const storedKeys = { ...(value?.translation_api_keys || {}) };
+  if (!Object.prototype.hasOwnProperty.call(storedKeys, provider) && value?.translation_api_key) {
+    storedKeys[provider] = String(value.translation_api_key);
+  }
+  const activeKey = String(storedKeys[provider] || '');
   // 旧版 settings.json 可能缺少新增字段；前端补齐默认值，是为了让升级后的设置页不因历史配置文件而失去控制项。
   // Older settings.json files may miss new fields; the frontend fills defaults so upgraded settings pages do not lose controls because of historical config files.
   return {
     ...value,
+    locale: value?.locale === 'auto' ? 'auto' : (normalizeLocaleCode(value?.locale || 'auto') || 'auto'),
     auto_update_enabled: value?.auto_update_enabled !== false,
+    translation_api_provider: provider,
+    translation_api_url: getTranslationProvider(provider).endpoint,
+    translation_api_key: activeKey,
+    translation_api_keys: storedKeys,
+    auto_destroy_seconds: Number(value?.auto_destroy_seconds ?? 3),
     log_retention_days: Number(value?.log_retention_days || 7),
     shortcuts: {
       ...defaultShortcuts,
@@ -270,21 +343,30 @@ function formatAutostartError(error, t) {
 
 function SettingsSoftDialog({ dialog, t, onClose }) {
   if (!dialog) return null;
+  const DialogIcon = dialog.icon === 'warning' ? TriangleAlert : (dialog.icon === 'update' ? RefreshCw : HelpCircle);
+  const iconClass = dialog.icon === 'warning' ? 'warning' : (dialog.icon === 'update' ? 'update' : '');
   async function runConfirm() {
     const action = dialog.onConfirm;
     onClose();
     if (action) await action();
   }
+  async function runCancel() {
+    const action = dialog.onCancel;
+    onClose();
+    // “稍后处理”只在用户明确按下该按钮时执行后续动作，点击遮罩仍保持纯关闭，避免意外切换语言。
+    // “Handle later” runs its follow-up only from the explicit button; backdrop dismissal remains a plain close to avoid accidental locale switches.
+    if (action) await action();
+  }
   return (
     <div className="soft-modal-backdrop settings-dialog-backdrop" role="presentation" onClick={onClose}>
       <section className={`soft-modal-card settings-dialog-card ${dialog.danger ? 'danger' : ''}`} role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
-        <span className="settings-dialog-icon"><HelpCircle size={19} /></span>
+        <span className={`settings-dialog-icon ${iconClass}`}><DialogIcon size={19} /></span>
         <div className="settings-dialog-copy">
           <strong>{dialog.title}</strong>
           <p>{dialog.message}</p>
         </div>
         <div className="settings-dialog-actions">
-          {dialog.kind === 'confirm' ? <button className="soft-button" onClick={onClose}>{dialog.cancelLabel || t('cancel')}</button> : null}
+          {dialog.kind === 'confirm' ? <button className="soft-button" onClick={runCancel}>{dialog.cancelLabel || t('cancel')}</button> : null}
           <button className={dialog.danger ? 'soft-button danger-line' : 'primary-button'} onClick={dialog.kind === 'confirm' ? runConfirm : onClose}>{dialog.confirmLabel || t('ok')}</button>
         </div>
       </section>
@@ -292,7 +374,69 @@ function SettingsSoftDialog({ dialog, t, onClose }) {
   );
 }
 
-export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCheckUpdate }) {
+
+const defaultTranslationProvider = 'uapis';
+const translationProviders = {
+  mymemory: {
+    id: 'mymemory',
+    endpoint: 'https://api.mymemory.translated.net/get',
+    logName: 'MyMemory public translation API',
+    supportsApiKey: false
+  },
+  uapis: {
+    id: 'uapis',
+    endpoint: 'https://uapis.cn/api/v1/translate/text',
+    logName: 'UAPI translate API',
+    supportsApiKey: true
+  }
+};
+
+function normalizeTranslationProvider(value, legacyUrl = '') {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (translationProviders[normalized]) return normalized;
+  const legacy = String(legacyUrl || '').toLowerCase();
+  if (legacy.includes('uapis.cn')) return 'uapis';
+  return defaultTranslationProvider;
+}
+
+function getTranslationProvider(value, legacyUrl = '') {
+  return translationProviders[normalizeTranslationProvider(value, legacyUrl)] || translationProviders[defaultTranslationProvider];
+}
+
+function providerNameFromId(value, legacyUrl = '') {
+  return getTranslationProvider(value, legacyUrl).logName;
+}
+
+function mapTranslationTargetCode(code, providerId = defaultTranslationProvider) {
+  const normalized = normalizeLocaleCode(code);
+  if (normalized === 'zh-Hant' || normalized === 'zh-TW' || normalized.startsWith('zh-Hant-')) return 'zh-TW';
+  if (normalized === 'zh-Hans' || normalized === 'zh-CN' || normalized.startsWith('zh-Hans-')) return providerId === 'uapis' ? 'zh' : 'zh-CN';
+  return normalized;
+}
+
+function isBuiltInLanguageCode(code) {
+  const normalized = normalizeLocaleCode(code);
+  return normalized === 'en'
+    || normalized.startsWith('en-')
+    || normalized === 'zh'
+    || normalized === 'zh-CN'
+    || normalized === 'zh-Hans'
+    || normalized.startsWith('zh-Hans-');
+}
+
+function languageSourceFingerprint(value) {
+  // 中文：前后端使用相同的 FNV-1a 指纹，是为了让语言文件可离线检查，并准确判断哪一条英文源文案发生了变化。
+  // English: Frontend and backend share the same FNV-1a fingerprint so language files can be inspected offline and each changed English source string is identified precisely.
+  let hash = 0x811c9dc5;
+  const bytes = new TextEncoder().encode(String(value || ''));
+  for (const byte of bytes) {
+    hash ^= byte;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+}
+
+export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCheckUpdate, languagePacks = [], onLanguagePacksChange = () => {} }) {
   const [settings, setSettings] = useState(() => normalizeSettings(boot.settings));
   const [dataUsage, setDataUsage] = useState(null);
   const [logStatus, setLogStatus] = useState(null);
@@ -300,11 +444,18 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
   const [cleanupDays, setCleanupDays] = useState(30);
   const [cleanupPreservePinned, setCleanupPreservePinned] = useState(true);
   const [settingsDialog, setSettingsDialog] = useState(null);
+  const [languageCodeDraft, setLanguageCodeDraft] = useState('');
+  const [translationApiKeyDraft, setTranslationApiKeyDraft] = useState(() => String(settings.translation_api_key || ''));
+  const [languageGenerationState, setLanguageGenerationState] = useState({ busy: false, message: '', error: false, current: 0, total: 0, percent: 0 });
+  const settingsScrollRef = useTransientScrollbar();
+  const languagePackGridRef = useTransientScrollbar();
 
   useEffect(() => {
     // 设置页存在本地编辑态；当快捷键从后端改变服务开关时，需要用最新 boot 设置覆盖本地态。
     // The settings page has local edit state; when shortcuts change service switches in the backend, it must mirror the newest boot settings.
-    setSettings(normalizeSettings(boot.settings));
+    const normalized = normalizeSettings(boot.settings);
+    setSettings(normalized);
+    setTranslationApiKeyDraft(String(normalized.translation_api_key || ''));
   }, [boot.settings]);
 
   useEffect(() => {
@@ -316,6 +467,16 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
     const values = Object.values(settings.shortcuts || {}).map(normalizeShortcutForStorage);
     return new Set(values.filter((value, index) => values.indexOf(value) !== index));
   }, [settings.shortcuts]);
+
+  const languageChoices = useMemo(() => listLanguageChoices(languagePacks), [languagePacks]);
+  const coreLanguageOptions = useMemo(() => ([
+    { value: 'auto', label: t('autoLanguage') },
+    { value: 'en', label: 'English' },
+    { value: 'zh', label: '简体中文' }
+  ]), [t]);
+  const extraLanguageOptions = useMemo(() => languageChoices.filter((item) => !['en', 'zh'].includes(item.code)), [languageChoices]);
+  const activeTranslationProvider = getTranslationProvider(settings.translation_api_provider, settings.translation_api_url);
+  const referenceLanguageMessages = useMemo(() => getReferenceMessages('en'), []);
 
   async function persist(next) {
     const normalized = normalizeSettings(next);
@@ -354,6 +515,76 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
   }
 
   const update = (patch) => persist({ ...settings, ...patch });
+
+  async function chooseLocale(locale) {
+    const normalized = locale === 'auto' ? 'auto' : normalizeLocaleCode(locale);
+    const provider = ['auto', 'en', 'zh'].includes(normalized) ? 'built-in' : 'runtime-pack';
+    // 切换语言前后都写入轻量日志，是为了让“语言包是否被激活”可排查，同时不记录任何实际界面文案。
+    // Lightweight logs are written before and after locale switching so activation can be diagnosed without storing any UI copy.
+    await api.logLanguagePackEvent('activate_requested', normalized, provider, true, 'settings-ui').catch(() => {});
+    const saved = await update({ locale: normalized });
+    await api.logLanguagePackEvent('activate_saved', saved.locale, provider, true, 'settings-ui').catch(() => {});
+    return saved;
+  }
+
+  async function saveTranslationProvider(providerId) {
+    const previousProvider = getTranslationProvider(settings.translation_api_provider, settings.translation_api_url);
+    const normalized = normalizeTranslationProvider(providerId, settings.translation_api_url);
+    const provider = getTranslationProvider(normalized);
+    const storedKeys = {
+      ...(settings.translation_api_keys || {}),
+      [previousProvider.id]: previousProvider.supportsApiKey ? String(translationApiKeyDraft || '').trim() : ''
+    };
+    const nextKey = provider.supportsApiKey ? String(storedKeys[provider.id] || '') : '';
+    setTranslationApiKeyDraft(nextKey);
+    // 服务商切换时同时切换对应密钥，是为了避免把 UAPI 凭据继续显示或发送给无需密钥的 MyMemory 接口。
+    // Switching providers also switches the matching key so UAPI credentials are never left visible or sent to keyless MyMemory requests.
+    const saved = await update({
+      translation_api_provider: normalized,
+      translation_api_url: provider.endpoint,
+      translation_api_keys: storedKeys,
+      translation_api_key: nextKey
+    });
+    await api.logLanguagePackEvent('translation_provider_saved', '', provider.logName, true, normalized === defaultTranslationProvider ? 'default-provider' : 'selected-provider').catch(() => {});
+    return saved;
+  }
+
+  async function resetTranslationProvider() {
+    const provider = getTranslationProvider(defaultTranslationProvider);
+    setTranslationApiKeyDraft('');
+    const saved = await update({
+      translation_api_provider: defaultTranslationProvider,
+      translation_api_url: provider.endpoint,
+      translation_api_keys: {},
+      translation_api_key: ''
+    });
+    await api.logLanguagePackEvent('translation_provider_reset', '', provider.logName, true, 'provider-and-keys-reset').catch(() => {});
+    return saved;
+  }
+
+  async function saveTranslationApiKey(nextKey = translationApiKeyDraft) {
+    const provider = getTranslationProvider(settings.translation_api_provider, settings.translation_api_url);
+    if (!provider.supportsApiKey) return settings;
+    const normalizedKey = String(nextKey || '').trim();
+    const storedKeys = { ...(settings.translation_api_keys || {}), [provider.id]: normalizedKey };
+    if (normalizedKey === String(settings.translation_api_key || '')
+      && normalizedKey === String(settings.translation_api_keys?.[provider.id] || '')) return settings;
+    // 密钥保存只记录“是否存在”而不记录内容，是为了保留排错能力，同时避免把用户私密凭据写进日志。
+    // Key saving logs only whether a key exists, not its content, preserving diagnostics without writing private credentials to logs.
+    const saved = await update({ translation_api_key: normalizedKey, translation_api_keys: storedKeys });
+    await api.logLanguagePackEvent('translation_api_key_saved', '', provider.logName, true, normalizedKey ? 'key-present' : 'key-empty').catch(() => {});
+    return saved;
+  }
+
+  async function clearTranslationApiKey() {
+    const provider = getTranslationProvider(settings.translation_api_provider, settings.translation_api_url);
+    setTranslationApiKeyDraft('');
+    const storedKeys = { ...(settings.translation_api_keys || {}), [provider.id]: '' };
+    const saved = await update({ translation_api_key: '', translation_api_keys: storedKeys });
+    await api.logLanguagePackEvent('translation_api_key_cleared', '', provider.logName, true, 'settings-ui').catch(() => {});
+    return saved;
+  }
+
   const updateShortcuts = (key, value) => update({ shortcuts: { ...defaultShortcuts, ...(settings.shortcuts || {}), [key]: value } });
   const isMac = /Mac|iPhone|iPad|iPod/i.test(window.navigator?.platform || '');
 
@@ -406,10 +637,10 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
     setSettingsDialog({ kind: 'alert', title, message });
   }
 
-  function showSettingsConfirm(title, message, onConfirm, danger = false) {
+  function showSettingsConfirm(title, message, onConfirm, danger = false, labels = {}) {
     // 数据管理确认统一使用软件内弹窗，是为了避免原生 Windows 提示框破坏自绘界面的视觉一致性。
     // Data-management confirmations use an in-app dialog so native Windows alerts do not break the custom-drawn UI language.
-    setSettingsDialog({ kind: 'confirm', title, message, onConfirm, danger });
+    setSettingsDialog({ kind: 'confirm', title, message, onConfirm, danger, ...labels });
   }
 
   function clearData(preservePinned) {
@@ -439,6 +670,309 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
     }, true);
   }
 
+  async function refreshLanguagePacks() {
+    await api.logLanguagePackEvent('scan_requested', '', 'local-pack-store', true, 'settings-ui').catch(() => {});
+    const packs = await api.listLanguagePacks(referenceLanguageMessages).catch((error) => {
+      api.logLanguagePackEvent('scan_failed', '', 'local-pack-store', false, String(error?.message || error)).catch(() => {});
+      return [];
+    });
+    const normalized = Array.isArray(packs) ? packs : [];
+    const updateCount = normalized.filter((pack) => pack.integrity === 'update_available').length;
+    const errorCount = normalized.filter((pack) => ['corrupt', 'incomplete'].includes(pack.integrity)).length;
+    await api.logLanguagePackEvent('scan_finished', '', 'local-pack-store', true, `${normalized.length} pack(s), ${updateCount} update(s), ${errorCount} error(s)`).catch(() => {});
+    onLanguagePacksChange(normalized);
+    return normalized;
+  }
+
+  function preservePlaceholders(text) {
+    const placeholders = [];
+    const safe = String(text || '').replace(/\{[^}]+\}/g, (match) => {
+      const token = `CLIPANCHOR_PLACEHOLDER_${placeholders.length}`;
+      placeholders.push([token, match]);
+      return token;
+    });
+    return { safe, placeholders };
+  }
+
+  function restorePlaceholders(text, placeholders) {
+    return placeholders.reduce((value, [token, original]) => value.replaceAll(token, original), String(text || ''));
+  }
+
+  async function translateUiString(text, targetCode, providerId = settings.translation_api_provider, apiKey = translationApiKeyDraft) {
+    if (!String(text || '').trim()) return text || '';
+    const { safe, placeholders } = preservePlaceholders(text);
+    const provider = getTranslationProvider(providerId, settings.translation_api_url);
+    const apiTargetCode = mapTranslationTargetCode(targetCode, provider.id);
+    // 翻译请求统一交给 Tauri 后端，是为了绕开 WebView 的 CORS/fetch 限制，并让每个 Provider 的请求格式与返回字段集中适配。
+    // Translation requests are routed through the Tauri backend to avoid WebView CORS/fetch limits and keep provider-specific request/response adapters centralized.
+    const translated = await api.translateText(provider.id, apiTargetCode, safe, apiKey);
+    return restorePlaceholders(translated || safe, placeholders);
+  }
+
+  async function runLanguagePackGeneration(
+    requestedCode,
+    { activateAfterSave = false, regenerated = false, existingPack = null } = {}
+  ) {
+    const rawCode = String(requestedCode || '').trim();
+    const targetCode = normalizeLocaleCode(rawCode || detectSystemLanguageCode());
+    if (!/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$/.test(targetCode)) {
+      await api.logLanguagePackEvent('generate_rejected', targetCode, providerNameFromId(settings.translation_api_provider, settings.translation_api_url), false, 'invalid-code').catch(() => {});
+      setLanguageGenerationState({ busy: false, message: t('languageCodeInvalid'), error: true, current: 0, total: 0, percent: 0 });
+      return false;
+    }
+    if (isBuiltInLanguageCode(targetCode)) {
+      await api.logLanguagePackEvent('generate_rejected', targetCode, providerNameFromId(settings.translation_api_provider, settings.translation_api_url), false, 'built-in-language').catch(() => {});
+      setLanguageGenerationState({ busy: false, message: t('languageBuiltInNotice'), error: true, current: 0, total: 0, percent: 0 });
+      return false;
+    }
+
+    const effectiveProvider = getTranslationProvider(settings.translation_api_provider, settings.translation_api_url);
+    const activeApiKey = effectiveProvider.supportsApiKey ? String(translationApiKeyDraft || '').trim() : '';
+    if (effectiveProvider.supportsApiKey && activeApiKey !== String(settings.translation_api_key || '')) {
+      await saveTranslationApiKey(activeApiKey);
+    }
+
+    const currentPack = existingPack
+      || languagePacks.find((pack) => normalizeLocaleCode(pack?.code || '') === targetCode)
+      || null;
+    const label = currentPack?.native_name || currentPack?.nativeName || currentPack?.label || inferLanguageLabel(targetCode);
+    const reference = referenceLanguageMessages;
+    const entries = Object.entries(reference);
+    const previousMessages = currentPack?.messages && typeof currentPack.messages === 'object' ? currentPack.messages : {};
+    const previousStatus = currentPack?.message_status || currentPack?.messageStatus || {};
+    const backendOutdated = new Set(currentPack?.outdated_keys || currentPack?.outdatedKeys || []);
+    const translated = {};
+    const messageStatus = {};
+    const pendingEntries = [];
+    let reusedCount = 0;
+
+    for (const [key, sourceText] of entries) {
+      const hasPrevious = Object.prototype.hasOwnProperty.call(previousMessages, key);
+      const previousText = hasPrevious ? String(previousMessages[key] ?? '') : '';
+      const status = previousStatus[key] || {};
+      const sourceHash = languageSourceFingerprint(sourceText);
+      const translationHash = languageSourceFingerprint(previousText);
+      const storedTranslationHash = String(status.translation_hash || status.translationHash || '');
+      const manuallyEdited = Boolean(status.modified)
+        || Boolean(storedTranslationHash && storedTranslationHash !== translationHash);
+      const sourceChanged = Boolean(status.source_hash || status.sourceHash)
+        && String(status.source_hash || status.sourceHash) !== sourceHash;
+      const needsTranslation = !hasPrevious || ((sourceChanged || backendOutdated.has(key)) && !manuallyEdited);
+
+      if (needsTranslation) {
+        pendingEntries.push([key, sourceText]);
+        continue;
+      }
+
+      // 中文：未变化的译文直接复用，人工修改项也优先保留，是为了把 API 调用严格限制在新增或确实需要适配的界面文本上。
+      // English: Unchanged translations are reused and manually edited entries are preserved, limiting API calls strictly to new or genuinely outdated UI copy.
+      translated[key] = previousText;
+      messageStatus[key] = {
+        source_hash: sourceHash,
+        translation_hash: translationHash,
+        modified: manuallyEdited
+      };
+      reusedCount += 1;
+    }
+
+    const providerName = effectiveProvider.logName;
+    const total = pendingEntries.length;
+    setLanguageGenerationState({
+      busy: true,
+      message: total
+        ? t('languageProgressLabel').replace('{current}', '0').replace('{total}', String(total))
+        : t('languageCleaningObsolete'),
+      error: false,
+      current: 0,
+      total,
+      percent: total ? 0 : 100
+    });
+
+    try {
+      await api.logLanguagePackEvent(
+        regenerated ? 'regenerate_started' : 'generate_started',
+        targetCode,
+        providerName,
+        true,
+        `${total} translation request(s), ${reusedCount} reused`
+      ).catch(() => {});
+
+      if (total) {
+        await api.logLanguagePackEvent('translation_api_started', mapTranslationTargetCode(targetCode, effectiveProvider.id), providerName, true, `source en, pack ${targetCode}`).catch(() => {});
+      }
+
+      let lastLoggedProgress = 0;
+      // 中文：只顺序翻译待更新项，是为了兼容免费接口限流，同时避免软件更新后重复请求整份语言包。
+      // English: Only pending entries are translated sequentially to respect free-service rate limits and avoid retranslating an entire pack after application updates.
+      for (let index = 0; index < pendingEntries.length; index += 1) {
+        const [key, value] = pendingEntries[index];
+        const translatedValue = await translateUiString(value, targetCode, effectiveProvider.id, activeApiKey);
+        translated[key] = translatedValue;
+        messageStatus[key] = {
+          source_hash: languageSourceFingerprint(value),
+          translation_hash: languageSourceFingerprint(translatedValue),
+          modified: false
+        };
+        const current = index + 1;
+        const percent = Math.round((current / total) * 100);
+        setLanguageGenerationState({
+          busy: true,
+          message: t('languageProgressLabel').replace('{current}', String(current)).replace('{total}', String(total)),
+          error: false,
+          current,
+          total,
+          percent
+        });
+        if (percent >= lastLoggedProgress + 25 || current === total) {
+          lastLoggedProgress = percent;
+          await api.logLanguagePackEvent('translation_progress', mapTranslationTargetCode(targetCode, effectiveProvider.id), providerName, true, `${percent}% (${current}/${total})`).catch(() => {});
+        }
+      }
+
+      if (total) {
+        await api.logLanguagePackEvent('translation_api_finished', mapTranslationTargetCode(targetCode, effectiveProvider.id), providerName, true, `${total} message(s)`).catch(() => {});
+      }
+
+      const saved = await api.saveLanguagePack({
+        code: targetCode,
+        label: currentPack?.label || label,
+        native_name: currentPack?.native_name || currentPack?.nativeName || label,
+        source: `${providerName} (${mapTranslationTargetCode(targetCode, effectiveProvider.id)})`,
+        generated_at: new Date().toISOString(),
+        format: 'clipanchor-language-pack',
+        source_locale: 'en',
+        messages: translated,
+        message_status: messageStatus
+      });
+      const packs = await refreshLanguagePacks();
+      const nextLocale = saved?.code || targetCode;
+      if (activateAfterSave) {
+        await chooseLocale(nextLocale);
+      }
+      await api.logLanguagePackEvent(
+        regenerated ? 'regenerate_finished' : 'generate_finished',
+        nextLocale,
+        providerName,
+        true,
+        `${total} translated, ${reusedCount} reused`
+      ).catch(() => {});
+      setLanguageCodeDraft('');
+      const finalMessage = total === 0
+        ? t('languageNoUpdates').replace('{language}', label)
+        : t(regenerated ? 'languageIncrementalUpdateDone' : 'languageGenerateDone')
+          .replace('{language}', label)
+          .replace('{translated}', String(total))
+          .replace('{reused}', String(reusedCount));
+      setLanguageGenerationState({
+        busy: false,
+        message: finalMessage,
+        error: false,
+        current: total,
+        total,
+        percent: 100
+      });
+      onLanguagePacksChange(packs);
+      return true;
+    } catch (error) {
+      const rawError = String(error?.message || error);
+      const userMessage = rawError === 'TRANSLATION_RATE_LIMITED'
+        ? t('languageGenerateRateLimited')
+        : t('languageGenerateFailed').replace('{error}', rawError);
+      await api.logLanguagePackEvent(regenerated ? 'regenerate_failed' : 'generate_failed', targetCode, effectiveProvider.logName, false, rawError === 'TRANSLATION_RATE_LIMITED' ? '429 rate-limited' : rawError).catch(() => {});
+      setLanguageGenerationState({ busy: false, message: userMessage, error: true, current: 0, total: 0, percent: 0 });
+      return false;
+    }
+  }
+
+  async function generateLanguagePack() {
+    await runLanguagePackGeneration(languageCodeDraft, { activateAfterSave: true });
+  }
+
+  async function regenerateLanguagePack(language) {
+    const targetCode = normalizeLocaleCode(language?.code || '');
+    if (!targetCode || languageGenerationState.busy) return;
+    const existingPack = languagePacks.find((pack) => normalizeLocaleCode(pack?.code || '') === targetCode) || language;
+    await runLanguagePackGeneration(targetCode, {
+      activateAfterSave: settings.locale === targetCode,
+      regenerated: true,
+      existingPack
+    });
+  }
+
+  async function chooseExtraLanguage(language) {
+    const integrity = language?.integrity || 'complete';
+    if (integrity === 'complete') {
+      await chooseLocale(language.code);
+      return;
+    }
+
+    const label = language?.nativeName || language?.label || language?.code;
+    if (integrity === 'update_available') {
+      // 中文：可更新语言包仍允许立即使用，缺失文本由内置语言回退；随后提示增量更新，避免把普通更新误报成文件损坏。
+      // English: An updatable pack remains usable immediately with built-in fallback for missing text; an incremental-update prompt then keeps normal updates distinct from file corruption.
+      await chooseLocale(language.code);
+      const missing = language?.missingKeys?.length || 0;
+      const changed = language?.outdatedKeys?.length || 0;
+      const removed = language?.removedKeys?.length || 0;
+      const message = t('languageUpdateWarning')
+        .replace('{language}', label)
+        .replace('{missing}', String(missing))
+        .replace('{changed}', String(changed))
+        .replace('{removed}', String(removed));
+      showSettingsConfirm(
+        t('languageUpdateTitle'),
+        message,
+        () => regenerateLanguagePack(language),
+        false,
+        { confirmLabel: t('languageIncrementalUpdateAction'), cancelLabel: t('languageLaterAction'), icon: 'update' }
+      );
+      return;
+    }
+
+    const message = integrity === 'corrupt'
+      ? t('languageIntegrityCorrupt').replace('{language}', label)
+      : t('languageIntegrityIncomplete')
+        .replace('{language}', label)
+        .replace('{count}', String(language?.missingKeys?.length || 0));
+    showSettingsConfirm(
+      t('languageIntegrityTitle'),
+      message,
+      () => regenerateLanguagePack(language),
+      false,
+      { confirmLabel: t('languageRegenerateAction'), cancelLabel: t('languageLaterAction'), icon: 'warning' }
+    );
+  }
+
+
+  async function deleteLanguagePack(language) {
+    const targetCode = normalizeLocaleCode(language?.code || '');
+    if (!targetCode) return;
+    showSettingsConfirm(
+      t('languageDeleteTitle'),
+      t('languageDeleteConfirm').replace('{language}', language?.nativeName || language?.label || targetCode),
+      async () => {
+        try {
+          await api.logLanguagePackEvent('delete_requested', targetCode, 'local-pack-store', true, 'settings-ui').catch(() => {});
+          if (settings.locale === targetCode) {
+            // 当前语言被删除前先切回自动，是为了避免设置继续指向一个已经不存在的本地语言文件。
+            // The active locale is switched back to Auto before deletion so settings never point at a local pack that no longer exists.
+            await chooseLocale('auto');
+          }
+          const removed = await api.deleteLanguagePack(targetCode);
+          await api.logLanguagePackEvent('delete_finished', targetCode, 'local-pack-store', Boolean(removed), removed ? 'file removed' : 'file missing').catch(() => {});
+          const packs = await refreshLanguagePacks();
+          onLanguagePacksChange(packs);
+          setLanguageGenerationState({ busy: false, message: t('languageDeleteDone').replace('{language}', language?.nativeName || language?.label || targetCode), error: false, current: 0, total: 0, percent: 0 });
+        } catch (error) {
+          const detail = String(error?.message || error);
+          await api.logLanguagePackEvent('delete_failed', targetCode, 'local-pack-store', false, detail).catch(() => {});
+          setLanguageGenerationState({ busy: false, message: t('languageDeleteFailed').replace('{error}', detail), error: true, current: 0, total: 0, percent: 0 });
+        }
+      },
+      true
+    );
+  }
+
   const uiScale = Number(settings.ui_scale_percent ?? 100);
   const setUiScale = (value) => update({ ui_scale_percent: Number(value) });
   const setPopupScale = (value) => update({ popup_scale_percent: Number(value) });
@@ -454,7 +988,7 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
     .filter(Boolean);
 
   return (
-    <section className="settings-scroll scroll-area">
+    <section ref={settingsScrollRef} className="settings-scroll scroll-area">
       <div className="settings-grid refined-settings-grid compact-settings-grid">
         <div className="settings-card wide hero-card">
           <h2><Power size={18} /> {t('basic')}</h2>
@@ -470,9 +1004,118 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
         <div className="settings-card wide accent-card">
           <h2><Palette size={18} /> {t('appearance')}</h2>
           <div className="appearance-controls">
-            <label className="control-row"><SettingName help={t('helpLanguage')}>{t('language')}</SettingName><Segmented value={settings.locale} onChange={(v) => update({ locale: v })} options={[{ value: 'auto', label: t('autoLanguage') }, { value: 'en', label: 'English' }, { value: 'zh', label: '简体中文' }]} /></label>
-            <label className="control-row"><SettingName help={t('helpTheme')}>{t('theme')}</SettingName><Segmented value={settings.theme} onChange={(v) => update({ theme: v })} options={[{ value: 'system', label: t('system') }, { value: 'dark', label: t('dark') }, { value: 'light', label: t('light') }]} /></label>
-            <label className="control-row"><SettingName help={t('helpAnimation')}>{t('animation')}</SettingName><Segmented value={settings.animation_mode} onChange={(v) => update({ animation_mode: v })} options={[{ value: 'elegant', label: t('elegant') }, { value: 'performance', label: t('performance') }]} /></label>
+            <div className="appearance-basic-grid">
+              <div className="control-row language-control-row appearance-language-card"><SettingName help={t('helpLanguage')}>{t('language')}</SettingName><Segmented className="language-segmented" value={['auto', 'en', 'zh'].includes(settings.locale) ? settings.locale : ''} onChange={chooseLocale} options={coreLanguageOptions} /></div>
+              <label className="control-row appearance-theme-card"><SettingName help={t('helpTheme')}>{t('theme')}</SettingName><Segmented value={settings.theme} onChange={(v) => update({ theme: v })} options={[{ value: 'system', label: t('system') }, { value: 'dark', label: t('dark') }, { value: 'light', label: t('light') }]} /></label>
+              <label className="control-row appearance-animation-card"><SettingName help={t('helpAnimation')}>{t('animation')}</SettingName><Segmented value={settings.animation_mode} onChange={(v) => update({ animation_mode: v })} options={[{ value: 'elegant', label: t('elegant') }, { value: 'performance', label: t('performance') }]} /></label>
+            </div>
+            <div className="language-extension-panel">
+              <div className="language-pack-heading">
+                <span>{t('languagePackOther')}</span>
+                <small>{t('translationApiNotice')}</small>
+              </div>
+              <p className="language-pack-warning">{t('languagePackUnofficialUserNotice')}</p>
+              {extraLanguageOptions.length ? (
+                <div ref={languagePackGridRef} className="language-pack-grid scroll-area">
+                  {/* 扩展语言卡片把名称、代号和切换状态拆成独立层级，是为了避免操作按钮挤压主要信息。 */}
+                  {/* Extra-language cards separate the name, code, and switch state so action buttons cannot compress the primary information. */}
+                  {extraLanguageOptions.map((language) => {
+                    const active = settings.locale === language.code;
+                    const displayName = language.nativeName || language.label || language.code;
+                    const needsUpdate = language.integrity === 'update_available';
+                    const damaged = ['corrupt', 'incomplete'].includes(language.integrity);
+                    return (
+                      <div key={language.code} className={`language-pack-option ${active ? 'active' : ''} ${needsUpdate ? 'has-update' : ''} ${damaged ? 'has-error' : ''}`}>
+                        <button type="button" className="language-pack-select" aria-pressed={active} title={displayName} onClick={() => chooseExtraLanguage(language)}>
+                          <span className="language-pack-check" aria-hidden="true" />
+                          <span className="language-pack-main">
+                            <span className="language-pack-title-row">
+                              <strong>{displayName}</strong>
+                              <small className="language-pack-code">
+                                {language.code}
+                                {needsUpdate ? <RefreshCw className="language-pack-update-icon" size={12} title={t('languagePackNeedsUpdate')} aria-label={t('languagePackNeedsUpdate')} /> : null}
+                                {damaged ? <TriangleAlert className="language-pack-error-icon" size={12} title={t('languagePackDamaged')} aria-label={t('languagePackDamaged')} /> : null}
+                              </small>
+                            </span>
+                            <span className="language-pack-state">{active
+                              ? (needsUpdate ? `${t('languagePackActive')} · ${t('languagePackNeedsUpdate')}` : t('languagePackActive'))
+                              : (damaged ? t('languagePackDamaged') : (needsUpdate ? t('languagePackNeedsUpdate') : t('languagePackClickToUse')))}</span>
+                          </span>
+                        </button>
+                        <span className="language-pack-actions">
+                          <button type="button" className="language-pack-refresh" disabled={languageGenerationState.busy} title={needsUpdate ? t('languageIncrementalUpdateAction') : t('languageRefreshAction')} aria-label={needsUpdate ? t('languageIncrementalUpdateAction') : t('languageRefreshAction')} onClick={() => regenerateLanguagePack(language)}>
+                            <RefreshCw size={14} />
+                          </button>
+                          <button type="button" className="language-pack-delete" disabled={languageGenerationState.busy} title={t('languageDeleteAction')} aria-label={t('languageDeleteAction')} onClick={() => deleteLanguagePack(language)}>
+                            <Trash2 size={14} />
+                          </button>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="language-pack-empty" aria-disabled="true">{t('languagePackNone')}</div>
+              )}
+              <div className="language-generator-box">
+                <div>
+                  <strong>{t('languageGeneratorTitle')}</strong>
+                  <p>{t('languageGeneratorHint')}</p>
+                </div>
+                <div className="translation-api-settings">
+                  <div className="translation-api-copy">
+                    <strong>{t('translationApiSettingsTitle')}</strong>
+                    <small>{t('translationApiSettingsHint')}</small>
+                  </div>
+                  <div className="translation-provider-actions">
+                    <label className="translation-provider-select-wrap">
+                      <span>{t('translationProviderField')}</span>
+                      <DropdownSelect
+                        value={normalizeTranslationProvider(settings.translation_api_provider, settings.translation_api_url)}
+                        disabled={languageGenerationState.busy}
+                        ariaLabel={t('translationProviderField')}
+                        onChange={saveTranslationProvider}
+                        options={[
+                          { value: 'mymemory', label: t('translationProviderMyMemory') },
+                          { value: 'uapis', label: t('translationProviderUapis') }
+                        ]}
+                      />
+                    </label>
+                    <label className="translation-api-key-wrap">
+                      <span>{t('translationApiKeyField')}</span>
+                      <input
+                        type="password"
+                        value={activeTranslationProvider.supportsApiKey ? translationApiKeyDraft : ''}
+                        disabled={languageGenerationState.busy || !activeTranslationProvider.supportsApiKey}
+                        placeholder={activeTranslationProvider.supportsApiKey ? t('translationApiKeyPlaceholder') : t('translationApiKeyUnavailable')}
+                        autoComplete="off"
+                        onChange={(event) => setTranslationApiKeyDraft(event.target.value)}
+                        onBlur={() => saveTranslationApiKey()}
+                        onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                      />
+                      <button className="soft-button clear-api-key-button" type="button" disabled={languageGenerationState.busy || !activeTranslationProvider.supportsApiKey || !translationApiKeyDraft} onClick={clearTranslationApiKey}>{t('translationApiKeyClear')}</button>
+                    </label>
+                  </div>
+                </div>
+                <div className="language-generator-actions">
+                  <input value={languageCodeDraft} onChange={(event) => setLanguageCodeDraft(event.target.value)} placeholder={t('languageCodePlaceholder')} />
+                  <button className="primary-button" type="button" disabled={languageGenerationState.busy} onClick={generateLanguagePack}>{languageGenerationState.busy ? t('generatingLanguage') : t('generateLanguage')}</button>
+                  <button className="soft-button reset-api-button" type="button" disabled={languageGenerationState.busy} onClick={resetTranslationProvider}><RotateCcw size={13} />{t('translationApiReset')}</button>
+                </div>
+                {languageGenerationState.busy ? (
+                  <div className={`language-progress ${languageGenerationState.total ? '' : 'without-track'}`} role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={languageGenerationState.percent}>
+                    <div className="language-progress-meta">
+                      <span>{languageGenerationState.message}</span>
+                      {languageGenerationState.total ? <b>{t('languageProgressPercent').replace('{percent}', String(languageGenerationState.percent))}</b> : null}
+                    </div>
+                    {languageGenerationState.total ? <span className="language-progress-track"><i style={{ width: `${languageGenerationState.percent}%` }} /></span> : null}
+                  </div>
+                ) : languageGenerationState.message ? (
+                  <p className={`language-generation-result ${languageGenerationState.error ? 'error' : 'success'}`}>{languageGenerationState.message}</p>
+                ) : null}
+                <p className="language-generator-folder">{t('languagePackFolderHint').replace('{path}', `${boot.paths.data}/locales`)}</p>
+              </div>
+            </div>
           </div>
         </div>
 

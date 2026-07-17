@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUp, Copy, FileIcon, FolderOpen, ImageIcon, Layers, Pencil, Pin, Plus, RefreshCw, Save, Search, ShieldCheck, Sparkles, Star, Trash, X } from 'lucide-react';
 import { api } from '../api.js';
+import { useTransientScrollbar } from '../useTransientScrollbar.js';
 
 function iconFor(kind) {
   if (kind === 'image') return <ImageIcon size={18} />;
@@ -123,6 +124,7 @@ function TextRecordDialog({ mode, value, t, onChange, onCancel, onSave }) {
 export default function ClipboardPage({ t, refreshKey, mode = 'clipboard' }) {
   const favoriteMode = mode === 'favorites';
   const paneRef = useRef(null);
+  useTransientScrollbar(paneRef);
   const [query, setQuery] = useState('');
   const [kind, setKind] = useState(favoriteMode ? 'favorite' : 'all');
   const [records, setRecords] = useState([]);

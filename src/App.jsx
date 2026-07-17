@@ -3,7 +3,7 @@ import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Activity, CheckCircle2, ClipboardList, Download, Info, Loader2, LogOut, Maximize2, Minus, Moon, RefreshCw, Settings, Sparkles, Star, Sun, X } from 'lucide-react';
 import { api } from './api.js';
-import { createTranslator } from './i18n.js';
+import { createTranslator, getReferenceMessages } from './i18n.js';
 import { resolveThemeClass, useDocumentThemeSync, useSystemThemePreference } from './theme.js';
 import { shortcutDisplayTokens } from './shortcutDisplay.js';
 import ClipboardPage from './pages/ClipboardPage.jsx';
@@ -156,13 +156,11 @@ function AppTitlebar({ t }) {
   }
 
   return (
-    <header className="native-titlebar">
-      <div className="native-titlebar-brand">
-        <img src={appIcon} alt="" />
-        <span>ClipAnchor</span>
-      </div>
+    <header className="native-titlebar" data-tauri-drag-region>
       <div className="native-titlebar-drag" data-tauri-drag-region />
-      <div className="native-window-controls">
+      <div className="native-window-controls" aria-label="Window controls">
+        {/* 主窗口顶部不再展示应用名称，避免形成突兀的系统标题栏感；右上角仅保留一组轻量悬浮控制按钮。 */}
+        {/* The main window no longer shows the app name at the top, avoiding a harsh system-titlebar feel while keeping only lightweight floating controls. */}
         <button {...windowButtonProps(() => api.minimizeWindow(), () => getCurrentWindow().minimize())} title={t('minimize') || 'Minimize'} aria-label={t('minimize') || 'Minimize'}><Minus size={14} /></button>
         <button {...windowButtonProps(() => api.toggleMaximizeWindow(), () => getCurrentWindow().toggleMaximize())} title={t('maximize') || 'Maximize'} aria-label={t('maximize') || 'Maximize'}><Maximize2 size={13} /></button>
         <button className="close-control" {...windowButtonProps(() => api.closeMainWindow(), () => getCurrentWindow().close())} title={t('close') || 'Close'} aria-label={t('close') || 'Close'}><X size={14} /></button>
@@ -178,13 +176,17 @@ export default function App() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
   const [updateStatus, setUpdateStatus] = useState(null);
+  const [isWindowMaximized, setIsWindowMaximized] = useState(false);
+  const [languagePacks, setLanguagePacks] = useState([]);
   const systemPrefersDark = useSystemThemePreference();
   const activeThemeClass = resolveThemeClass(boot?.settings || { theme: 'system' }, systemPrefersDark);
   useDocumentThemeSync(activeThemeClass);
 
   useEffect(() => {
-    api.bootstrap().then((payload) => {
+    const requiredLanguageMessages = getReferenceMessages('en');
+    Promise.all([api.bootstrap(), api.listLanguagePacks(requiredLanguageMessages).catch(() => [])]).then(([payload, packs]) => {
       setBoot(payload);
+      setLanguagePacks(Array.isArray(packs) ? packs : []);
       return api.getUpdateStatus();
     }).then((status) => {
       if (!status) return;
@@ -211,8 +213,9 @@ export default function App() {
       try {
         // 主界面从长时间轻量模式恢复时主动重新拉取基础状态，是为了避免隐藏期间的设置、更新和历史变更让界面停留在旧快照。
         // When the main UI returns from a long Lite-mode session, refreshing bootstrap state prevents settings, update, and history views from showing stale snapshots.
-        const [payload, status] = await Promise.all([api.bootstrap(), api.getUpdateStatus()]);
+        const [payload, status, packs] = await Promise.all([api.bootstrap(), api.getUpdateStatus(), api.listLanguagePacks(requiredLanguageMessages).catch(() => [])]);
         setBoot(payload);
+        setLanguagePacks(Array.isArray(packs) ? packs : []);
         setUpdateStatus(status);
         setRefreshKey((value) => value + 1);
         if (status?.prompt_on_main_open) {
@@ -229,6 +232,42 @@ export default function App() {
       activationUnlistenPromise.then((unlisten) => unlisten()).catch(() => {});
     };
   }, []);
+
+  useEffect(() => {
+    if (route.view === 'popup') return undefined;
+    let disposed = false;
+    let resizeTimer = 0;
+    const appWindow = getCurrentWindow();
+
+    async function syncWindowMaximizedState() {
+      try {
+        const maximized = await appWindow.isMaximized();
+        if (!disposed) setIsWindowMaximized(Boolean(maximized));
+      } catch (error) {
+        // 当桌面 API 在极少数运行时不可用时，使用视口尺寸兜底，避免最大化后仍保留透明圆角露出桌面。
+        // When the desktop API is unavailable in rare runtimes, viewport size is a fallback so maximized windows do not keep transparent rounded corners.
+        const nearFullScreen = window.innerWidth >= window.screen.availWidth - 2 && window.innerHeight >= window.screen.availHeight - 2;
+        if (!disposed) setIsWindowMaximized(nearFullScreen);
+      }
+    }
+
+    function scheduleWindowStateSync() {
+      window.clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(syncWindowMaximizedState, 40);
+    }
+
+    syncWindowMaximizedState();
+    window.addEventListener('resize', scheduleWindowStateSync);
+    const resizedUnlistenPromise = typeof appWindow.onResized === 'function'
+      ? appWindow.onResized(scheduleWindowStateSync).catch(() => null)
+      : Promise.resolve(null);
+    return () => {
+      disposed = true;
+      window.clearTimeout(resizeTimer);
+      window.removeEventListener('resize', scheduleWindowStateSync);
+      resizedUnlistenPromise.then((unlisten) => { if (unlisten) unlisten(); }).catch(() => {});
+    };
+  }, [route.view]);
 
   useEffect(() => {
     if (!updateDialogOpen || !['checking', 'downloading'].includes(updateStatus?.status)) return undefined;
@@ -279,7 +318,7 @@ export default function App() {
     );
   }
 
-  const t = createTranslator(boot.settings.locale);
+  const t = createTranslator(boot.settings.locale, languagePacks);
   const themeClass = activeThemeClass;
   const uiScale = Math.min(2, Math.max(0.5, Number(boot.settings.ui_scale_percent || 100) / 100));
   const motionClass = boot.settings.animation_mode === 'performance' ? 'motion-performance' : 'motion-elegant';
@@ -348,7 +387,7 @@ export default function App() {
   const pinServiceShortcutTokens = shortcutDisplayTokens(boot.settings.shortcuts?.toggle_pin_service || 'Ctrl+Shift+P');
 
   return (
-    <main className={`app-shell codex-shell ${themeClass} ${motionClass}`} style={{ '--ui-scale': uiScale }}>
+    <main className={`app-shell codex-shell ${themeClass} ${motionClass} ${isWindowMaximized ? 'window-maximized' : ''}`} style={{ '--ui-scale': uiScale }}>
       <AppTitlebar t={t} />
       <section className="codex-frame">
         <aside className="codex-sidebar">
@@ -418,7 +457,7 @@ export default function App() {
             ) : tab === 'favorites' ? (
               <ClipboardPage t={t} settings={boot.settings} refreshKey={refreshKey} mode="favorites" />
             ) : (
-              <SettingsPage t={t} boot={boot} onBootChange={setBoot} updateStatus={updateStatus} onCheckUpdate={checkUpdate} />
+              <SettingsPage t={t} boot={boot} onBootChange={setBoot} updateStatus={updateStatus} onCheckUpdate={checkUpdate} languagePacks={languagePacks} onLanguagePacksChange={setLanguagePacks} />
             )}
           </div>
         </section>

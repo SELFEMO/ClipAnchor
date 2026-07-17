@@ -215,18 +215,51 @@ fn process_item(app: &AppHandle, state: &AppState, settings: &AppSettings, item:
         app_log::warn(&state.paths, "privacy", format!("sensitive item skipped kind={:?} hash={}", item.kind, short_hash(&item.content_hash)));
         return Ok(());
     }
-    close_duplicate_temp_popups(app, state, &item)?;
-    state.temp_items.lock().map_err(|error| error.to_string())?.insert(item.id.clone(), item.clone());
+
+    let duplicate_popups = duplicate_temp_popups(state, &item)?;
+    let has_pinned_duplicate_popup = duplicate_popups.iter().any(|popup| popup.is_pinned);
+    let mut effective_item = item.clone();
+
     if settings.history_service_enabled {
-        database::insert(&state.paths, &item)?;
-        app_log::info(&state.paths, "history", format!("record stored id={} kind={:?}", item.id, item.kind));
-        let _ = app.emit("history-updated", &item.id);
+        let outcome = database::insert_or_refresh(&state.paths, &item)?;
+        app_log::info(
+            &state.paths,
+            "history",
+            format!("record {} id={} kind={:?}", if outcome.was_duplicate { "refreshed" } else { "stored" }, outcome.record.id, outcome.record.kind)
+        );
+        effective_item = item_from_record(&outcome.record, item.is_pinned);
+        let _ = app.emit("history-updated", &outcome.record.id);
     }
-    if settings.pin_service_enabled {
-        app_log::info(&state.paths, "popup", format!("creating popup for id={} kind={:?}", item.id, item.kind));
-        popup::create_popup(app, state, &item, settings)?;
+
+    if !settings.pin_service_enabled {
+        return Ok(());
     }
+
+    if has_pinned_duplicate_popup {
+        app_log::info(&state.paths, "popup", format!("duplicate pinned popup kept for hash={}", short_hash(&item.content_hash)));
+        return Ok(());
+    }
+
+    close_duplicate_temp_popups(app, state, &duplicate_popups)?;
+    state.temp_items.lock().map_err(|error| error.to_string())?.insert(effective_item.id.clone(), effective_item.clone());
+    app_log::info(&state.paths, "popup", format!("creating popup for id={} kind={:?}", effective_item.id, effective_item.kind));
+    popup::create_popup(app, state, &effective_item, settings)?;
     Ok(())
+}
+
+fn item_from_record(record: &HistoryRecord, pinned: bool) -> ClipItem {
+    ClipItem {
+        id: record.id.clone(),
+        kind: record.kind.clone(),
+        summary: record.summary.clone(),
+        text_content: record.text_content.clone(),
+        image_path: record.image_path.clone(),
+        file_paths: record.file_paths.clone(),
+        bytes: record.bytes,
+        created_at: record.created_at.clone(),
+        content_hash: record.content_hash.clone(),
+        is_pinned: pinned,
+    }
 }
 
 fn short_hash(hash: &str) -> String {
@@ -454,25 +487,32 @@ fn token_looks_like_secret(raw: &str) -> bool {
     alnum_count >= 32 && has_upper && has_lower && has_digit && separator_count <= 8
 }
 
-fn close_duplicate_temp_popups(app: &AppHandle, state: &AppState, item: &ClipItem) -> Result<(), String> {
-    let duplicate_ids = {
-        let guard = state.temp_items.lock().map_err(|error| error.to_string())?;
-        guard.iter()
-            .filter(|(id, existing)| {
-                *id != &item.id
-                    && existing.kind == item.kind
-                    && !existing.content_hash.is_empty()
-                    && existing.content_hash == item.content_hash
-            })
-            .map(|(id, _)| id.clone())
-            .collect::<Vec<_>>()
-    };
-    for id in duplicate_ids {
-        app_log::info(&state.paths, "popup", format!("duplicate popup closed: {}", id));
-        // 新内容去重时同步关闭同内容旧弹窗，是为了让“最新复制”在历史记录和桌面弹窗中都保持唯一。
-        // Duplicate popups are closed when newer identical content arrives so the newest copy stays unique in both history and desktop cards.
-        let _ = popup::close_popup(app, &id);
-        state.temp_items.lock().map_err(|error| error.to_string())?.remove(&id);
+#[derive(Clone, Debug)]
+struct DuplicatePopupState {
+    id: String,
+    is_pinned: bool,
+}
+
+fn duplicate_temp_popups(state: &AppState, item: &ClipItem) -> Result<Vec<DuplicatePopupState>, String> {
+    let guard = state.temp_items.lock().map_err(|error| error.to_string())?;
+    Ok(guard.iter()
+        .filter(|(id, existing)| {
+            *id != &item.id
+                && existing.kind == item.kind
+                && !existing.content_hash.is_empty()
+                && existing.content_hash == item.content_hash
+        })
+        .map(|(id, existing)| DuplicatePopupState { id: id.clone(), is_pinned: existing.is_pinned })
+        .collect())
+}
+
+fn close_duplicate_temp_popups(app: &AppHandle, state: &AppState, duplicates: &[DuplicatePopupState]) -> Result<(), String> {
+    for duplicate in duplicates.iter().filter(|duplicate| !duplicate.is_pinned) {
+        app_log::info(&state.paths, "popup", format!("duplicate transient popup closed: {}", duplicate.id));
+        // 只回收未置顶的同内容临时弹窗，是为了避免重复复制干扰用户已经 Pin 住的内容。
+        // Only unpinned duplicate transient popups are recycled so repeated copies never disturb content the user has pinned.
+        let _ = popup::close_popup(app, &duplicate.id);
+        state.temp_items.lock().map_err(|error| error.to_string())?.remove(&duplicate.id);
     }
     Ok(())
 }

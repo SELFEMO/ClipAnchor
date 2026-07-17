@@ -17,6 +17,7 @@ mod shortcut;
 mod tray;
 mod update_service;
 mod window_control;
+mod window_shape;
 
 use commands::*;
 use models::AppState;
@@ -27,6 +28,53 @@ fn log_startup_issue(state: &AppState, message: &str) {
     // 启动诊断写入文件而不是标准错误，是为了让普通开发/运行命令保持干净，同时仍能通过日志定位启动问题。
     // Startup diagnostics are written to the log file instead of stderr so normal dev/runtime commands stay clean while issues remain traceable.
     app_log::info(&state.paths, "startup", message);
+}
+
+fn reconcile_autostart_setting(state: &AppState) {
+    let configured = match state.settings.lock() {
+        Ok(settings) => settings.auto_start,
+        Err(error) => {
+            log_startup_issue(
+                state,
+                &format!("Autostart reconciliation skipped because settings are locked: {}", error),
+            );
+            return;
+        }
+    };
+
+    match autostart::reconcile(configured, &state.paths.root) {
+        Ok(actual) if actual != configured => {
+            let mut settings_guard = match state.settings.lock() {
+                Ok(settings) => settings,
+                Err(error) => {
+                    log_startup_issue(
+                        state,
+                        &format!("Autostart state changed externally but settings could not be updated: {}", error),
+                    );
+                    return;
+                }
+            };
+            // 系统启动项可能在应用外被修改；把核验后的实际状态写回设置，是为了避免界面显示过期值并在下次操作时覆盖用户选择。
+            // OS startup entries can change outside the app; writing the verified state back prevents stale UI and avoids overwriting the user's choice later.
+            settings_guard.auto_start = actual;
+            if let Err(error) = settings::save(&state.paths, &settings_guard) {
+                log_startup_issue(
+                    state,
+                    &format!("Autostart state was detected but could not be persisted: {}", error),
+                );
+            } else {
+                log_startup_issue(
+                    state,
+                    &format!("Autostart setting synchronized with operating system state: {}", actual),
+                );
+            }
+        }
+        Ok(_) => log_startup_issue(state, "Autostart setting verified"),
+        Err(error) => log_startup_issue(
+            state,
+            &format!("Autostart reconciliation skipped: {}", error),
+        ),
+    }
 }
 
 // 将 Tauri 启动流程放在库入口中，是为了匹配 Cargo.toml 中的 clipanchor_lib 目标，并让桌面入口与潜在移动入口复用同一套初始化逻辑。
@@ -42,6 +90,13 @@ pub fn run() {
             return;
         }
     };
+
+    if let Err(error) = paths::configure_webview_storage(&state.paths) {
+        // WebView 用户数据目录必须在 Builder 创建任何窗口前确定，否则 WebView2 已锁定默认 AppData 路径后再修改将不会生效。
+        // The WebView user-data directory must be fixed before Builder creates any window, because changing it after WebView2 locks the default AppData path has no effect.
+        eprintln!("ClipAnchor failed to configure WebView storage: {}", error);
+        return;
+    }
 
     let panic_log_paths = state.paths.clone();
     panic::set_hook(Box::new(move |info| {
@@ -72,6 +127,7 @@ pub fn run() {
                 if let Some(state) = app.try_state::<AppState>() {
                     log_startup_issue(state.inner(), "macOS Quit menu requested application exit");
                 }
+                let _ = crate::window_control::save_main_window_position(app);
                 app.exit(0);
             }
             _ => {}
@@ -79,6 +135,11 @@ pub fn run() {
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             get_bootstrap,
+            list_language_packs,
+            save_language_pack,
+            delete_language_pack,
+            log_language_pack_event,
+            translate_ui_text,
             save_settings,
             set_pin_service,
             set_history_service,
@@ -129,6 +190,15 @@ pub fn run() {
             let state = app.state::<AppState>().inner().clone();
             let _ = app_log::init(&state.paths);
             log_startup_issue(&state, "Tauri setup started");
+            #[cfg(target_os = "windows")]
+            log_startup_issue(
+                &state,
+                &format!(
+                    "WebView storage configured at {}",
+                    paths::webview_storage_path(&state.paths).display()
+                ),
+            );
+            reconcile_autostart_setting(&state);
             // 启动期的托盘、快捷键和剪贴板监听都降级为可恢复错误，避免某个系统能力失败就让整个程序退出。
             // Tray, shortcut, and clipboard startup failures are treated as recoverable so one OS capability cannot close the whole app.
             if let Err(error) = app_menu::install(app.handle()) {
@@ -159,6 +229,11 @@ pub fn run() {
                     }
                 }
                 Err(error) => log_startup_issue(&state, &format!("Settings lock unavailable during startup: {}", error)),
+            }
+            if let Some(window) = handle.get_webview_window("main") {
+                let _ = window.set_shadow(false);
+                // 主窗口使用透明 WebView 加单层 CSS 圆角，是为了避开 Windows 无边框窗口的隐藏缩放边框被 Region 裁剪后露出的直线边缘。
+                // The main window uses a transparent WebView plus one CSS radius to avoid exposing straight hidden resize borders after Windows Region clipping.
             }
             let lite_startup = window_control::should_start_in_lite_mode();
             let auto_update_enabled = state.settings.lock().map(|settings| settings.auto_update_enabled).unwrap_or(true);
@@ -197,9 +272,12 @@ pub fn run() {
                     // Closing the main window only hides it to tray and keeps monitoring alive so idle or close-to-tray sessions do not kill background services.
                     api.prevent_exit();
                     let _ = window_control::hide_main_window(app_handle);
-                } else if let Some(state) = app_handle.try_state::<AppState>() {
-                    log_startup_issue(state.inner(), &format!("Application exit requested with code {:?}", code));
-                    clipboard_service::stop_monitor(state.inner());
+                } else {
+                    let _ = window_control::save_main_window_position(app_handle);
+                    if let Some(state) = app_handle.try_state::<AppState>() {
+                        log_startup_issue(state.inner(), &format!("Application exit requested with code {:?}", code));
+                        clipboard_service::stop_monitor(state.inner());
+                    }
                 }
             }
             RunEvent::WindowEvent { label, event: WindowEvent::CloseRequested { api, .. }, .. } if label == "main" => {
@@ -210,6 +288,20 @@ pub fn run() {
                 // Intercepting the native close event and hiding the window prevents the main WebView from being destroyed while background services continue running.
                 api.prevent_close();
                 let _ = window_control::hide_main_window(app_handle);
+            }
+            RunEvent::WindowEvent { label, event: WindowEvent::Resized(_), .. } if label == "main" => {
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let _ = window.set_shadow(false);
+                    // 缩放时只确认关闭原生阴影，是为了让主界面外轮廓始终由前端单一圆角负责，而不是再次叠加系统边框。
+                    // During resize we only keep the native shadow disabled so the main outline stays owned by one frontend radius instead of stacking system borders again.
+                }
+            }
+            RunEvent::WindowEvent { label, event: WindowEvent::ScaleFactorChanged { .. }, .. } if label == "main" => {
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let _ = window.set_shadow(false);
+                    // DPI 变化不再重放 Region 裁剪，是为了避免 Windows 在不同缩放比下重新暴露隐藏的非客户区边线。
+                    // DPI changes no longer replay Region clipping, which avoids Windows exposing hidden non-client edge lines at different scale factors.
+                }
             }
             RunEvent::WindowEvent { .. } => {}
             _ => {}

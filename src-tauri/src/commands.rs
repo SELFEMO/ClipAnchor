@@ -1,4 +1,4 @@
-use crate::{app_log, autostart, clipboard_service, database, models::{AppSettings, AppState, BootstrapPayload, ClipItem, ClipKind, HistoryRecord, PathPayload, UpdateStatusPayload}, popup, settings, update_service};
+use crate::{app_log, autostart, clipboard_service, database, models::{AppSettings, AppState, BootstrapPayload, ClipItem, ClipKind, HistoryRecord, LanguageMessageStatus, LanguagePackPayload, PathPayload, UpdateStatusPayload}, popup, settings, update_service};
 use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
 use std::{collections::HashMap, fs, io::{Read, Write}, path::Path, process::Command, thread, time::Duration};
@@ -54,6 +54,9 @@ pub fn close_main_window(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn quit_app(app: AppHandle) -> Result<(), String> {
+    // 退出前保存主窗口正常位置，是为了让下次启动回到用户最后整理好的工作区，而不是随机落在桌面。
+    // Saving the normal main-window position before exit lets the next launch return to the user's arranged workspace instead of landing randomly.
+    let _ = crate::window_control::save_main_window_position(&app);
     // 退出程序交给 Tauri 正常清理 WebView2 窗口，是为了避免强制 process::exit 触发 Chrome_WidgetWin_0 注销警告。
     // Quitting through Tauri lets WebView2 windows clean up normally, avoiding the Chrome_WidgetWin_0 unregister warning caused by forced process::exit.
     app.exit(0);
@@ -93,9 +96,568 @@ fn native_toggle_maximize_main_window() -> bool {
     true
 }
 
+fn canonical_language_part(part: &str, index: usize) -> String {
+    let cleaned: String = part.chars().filter(|ch| ch.is_ascii_alphanumeric()).collect();
+    if cleaned.is_empty() {
+        return String::new();
+    }
+    if index == 0 {
+        return cleaned.to_ascii_lowercase();
+    }
+    if cleaned.len() == 4 && cleaned.chars().all(|ch| ch.is_ascii_alphabetic()) {
+        let mut chars = cleaned.chars();
+        let first = chars.next().map(|ch| ch.to_ascii_uppercase()).unwrap_or_default();
+        let rest: String = chars.map(|ch| ch.to_ascii_lowercase()).collect();
+        return format!("{}{}", first, rest);
+    }
+    if (cleaned.len() == 2 && cleaned.chars().all(|ch| ch.is_ascii_alphabetic()))
+        || (cleaned.len() == 3 && cleaned.chars().all(|ch| ch.is_ascii_digit()))
+    {
+        return cleaned.to_ascii_uppercase();
+    }
+    cleaned.to_ascii_lowercase()
+}
+
+fn normalize_language_code(value: &str) -> String {
+    // 后端保存语言包时也保持 BCP-47 标准大小写，是为了让 zh-Hant/zh-TW 不再被当作内置简体中文处理。
+    // The backend also preserves BCP-47 casing when saving packs so zh-Hant/zh-TW are not collapsed into the built-in Simplified Chinese locale.
+    value
+        .trim()
+        .replace('_', "-")
+        .split('-')
+        .enumerate()
+        .map(|(index, part)| canonical_language_part(part, index))
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+fn is_core_language_code(code: &str) -> bool {
+    code == "en"
+        || code.starts_with("en-")
+        || code == "zh"
+        || code == "zh-CN"
+        || code == "zh-Hans"
+        || code.starts_with("zh-Hans-")
+}
+
+fn language_pack_dir(state: &AppState) -> std::path::PathBuf {
+    state.paths.data.join("locales")
+}
+
+fn language_source_hash(value: &str) -> String {
+    // 稳定的轻量指纹只用于判断内置英文文案是否变化，避免未变化条目重复调用翻译接口。
+    // A stable lightweight fingerprint detects changes in built-in English copy, avoiding repeated API calls for unchanged entries.
+    let mut hash: u32 = 0x811c9dc5;
+    for byte in value.as_bytes() {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(0x01000193);
+    }
+    format!("{hash:08x}")
+}
+
+#[tauri::command]
+pub fn list_language_packs(reference_messages: HashMap<String, String>, state: State<'_, AppState>) -> Result<Vec<LanguagePackPayload>, String> {
+    let directory = language_pack_dir(&state);
+    app_log::info(&state.paths, "i18n", format!("checking language pack directory {}", directory.to_string_lossy()));
+    if !directory.exists() {
+        app_log::info(&state.paths, "i18n", "checked language packs: directory missing, 0 pack(s)");
+        return Ok(Vec::new());
+    }
+
+    let mut packs = Vec::new();
+    for entry in fs::read_dir(&directory).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        let is_json = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(|value| value.eq_ignore_ascii_case("json"))
+            .unwrap_or(false);
+        if !is_json {
+            continue;
+        }
+
+        let file_name = path.file_name().and_then(|value| value.to_str()).unwrap_or_default().to_string();
+        let file_code = normalize_language_code(path.file_stem().and_then(|value| value.to_str()).unwrap_or_default());
+        if file_code.is_empty() || is_core_language_code(&file_code) {
+            continue;
+        }
+
+        let text = match fs::read_to_string(&path) {
+            Ok(value) => value,
+            Err(error) => {
+                // 中文：无法读取的手动语言文件仍显示在设置页，是为了让用户看到错误标记并直接修复。
+                // English: Unreadable manual language files remain visible in Settings so users can see an error marker and repair them.
+                packs.push(damaged_language_pack(&file_code, &file_name, error.to_string()));
+                continue;
+            }
+        };
+        let mut pack = match serde_json::from_str::<LanguagePackPayload>(&text) {
+            Ok(value) => value,
+            Err(error) => {
+                packs.push(damaged_language_pack(&file_code, &file_name, error.to_string()));
+                continue;
+            }
+        };
+
+        // 中文：文件名作为稳定语言代号，是为了让刷新、更新和删除始终操作同一个本地文件。
+        // English: The filename is used as the stable language code so refresh, update, and delete always target the same local file.
+        pack.code = file_code.clone();
+        if pack.label.trim().is_empty() {
+            pack.label = pack.code.to_uppercase();
+        }
+        if pack.native_name.trim().is_empty() {
+            pack.native_name = pack.label.clone();
+        }
+
+        let mut metadata_changed = false;
+        if pack.format != "clipanchor-language-pack" {
+            pack.format = "clipanchor-language-pack".into();
+            metadata_changed = true;
+        }
+        if pack.source_locale.trim().is_empty() {
+            pack.source_locale = "en".into();
+            metadata_changed = true;
+        }
+        if pack.file_name != file_name {
+            pack.file_name = file_name;
+            metadata_changed = true;
+        }
+
+        pack.integrity_error.clear();
+        pack.missing_keys.clear();
+        pack.outdated_keys.clear();
+        pack.removed_keys.clear();
+
+        for (key, source_text) in &reference_messages {
+            let current_source_hash = language_source_hash(source_text);
+            let Some(translated_text) = pack.messages.get(key) else {
+                pack.missing_keys.push(key.clone());
+                continue;
+            };
+            let current_translation_hash = language_source_hash(translated_text);
+
+            match pack.message_status.get_mut(key) {
+                Some(status) => {
+                    // 中文：译文指纹变化说明用户或外部工具手动改过该项；保留此标记可避免增量更新覆盖人工修订。
+                    // English: A changed translation fingerprint means the entry was edited manually or by an external tool; preserving this marker prevents incremental updates from overwriting human revisions.
+                    if !status.translation_hash.is_empty() && status.translation_hash != current_translation_hash && !status.modified {
+                        status.modified = true;
+                        metadata_changed = true;
+                    }
+                    if status.translation_hash.is_empty() {
+                        status.translation_hash = current_translation_hash.clone();
+                        metadata_changed = true;
+                    }
+                    if status.source_hash.is_empty() {
+                        // 中文：旧格式文件没有源文案指纹时，以当前英文建立基线而不整包重译，是为了避免升级后突然消耗大量 API 次数。
+                        // English: Legacy files without source fingerprints establish the current English copy as a baseline without retranslating the whole pack, avoiding an unexpected API spike after upgrade.
+                        status.source_hash = current_source_hash.clone();
+                        metadata_changed = true;
+                    } else if status.source_hash != current_source_hash {
+                        pack.outdated_keys.push(key.clone());
+                    }
+                }
+                None => {
+                    // 中文：为旧语言文件逐项补充状态，而不修改译文正文，使用户直接复制的 JSON 也能从此获得增量更新能力。
+                    // English: Add per-entry status to legacy language files without changing translated copy, so directly copied JSON files gain incremental update support.
+                    pack.message_status.insert(
+                        key.clone(),
+                        LanguageMessageStatus {
+                            source_hash: current_source_hash,
+                            translation_hash: current_translation_hash,
+                            modified: false,
+                        },
+                    );
+                    metadata_changed = true;
+                }
+            }
+        }
+
+        let obsolete_status_keys = pack
+            .message_status
+            .keys()
+            .filter(|key| !pack.messages.contains_key(*key))
+            .cloned()
+            .collect::<Vec<_>>();
+        for key in obsolete_status_keys {
+            pack.message_status.remove(&key);
+            metadata_changed = true;
+        }
+
+        pack.removed_keys = pack
+            .messages
+            .keys()
+            .filter(|key| !reference_messages.contains_key(*key))
+            .cloned()
+            .collect();
+        pack.missing_keys.sort();
+        pack.outdated_keys.sort();
+        pack.removed_keys.sort();
+        pack.integrity = if pack.messages.is_empty() {
+            "incomplete".into()
+        } else if !pack.missing_keys.is_empty() || !pack.outdated_keys.is_empty() || !pack.removed_keys.is_empty() {
+            "update_available".into()
+        } else {
+            "complete".into()
+        };
+
+        if metadata_changed {
+            // 中文：扫描只补充兼容元数据而不改写翻译正文，是为了让手动语言文件可升级、可校验且不丢失用户内容。
+            // English: Scanning adds compatibility metadata without rewriting translated copy, making manual packs upgradeable and verifiable without losing user content.
+            match serde_json::to_string_pretty(&pack) {
+                Ok(serialized) => {
+                    if let Err(error) = fs::write(&path, serialized) {
+                        app_log::warn(&state.paths, "i18n", format!("failed to persist language status metadata for {}: {}", pack.code, error));
+                    }
+                }
+                Err(error) => app_log::warn(&state.paths, "i18n", format!("failed to serialize language status metadata for {}: {}", pack.code, error)),
+            }
+        }
+        packs.push(pack);
+    }
+
+    packs.sort_by(|left, right| left.label.to_lowercase().cmp(&right.label.to_lowercase()));
+    let update_count = packs.iter().filter(|pack| pack.integrity == "update_available").count();
+    let error_count = packs.iter().filter(|pack| matches!(pack.integrity.as_str(), "corrupt" | "incomplete")).count();
+    app_log::info(
+        &state.paths,
+        "i18n",
+        format!("checked language packs: {} pack(s), {} update(s), {} error(s)", packs.len(), update_count, error_count),
+    );
+    Ok(packs)
+}
+
+fn damaged_language_pack(code: &str, file_name: &str, error: String) -> LanguagePackPayload {
+    LanguagePackPayload {
+        code: code.to_string(),
+        label: code.to_uppercase(),
+        native_name: code.to_uppercase(),
+        source: "local-file".into(),
+        format: "clipanchor-language-pack".into(),
+        source_locale: "en".into(),
+        file_name: file_name.to_string(),
+        integrity: "corrupt".into(),
+        integrity_error: error.chars().take(180).collect(),
+        ..LanguagePackPayload::default()
+    }
+}
+
+#[tauri::command]
+pub fn save_language_pack(mut pack: LanguagePackPayload, state: State<'_, AppState>) -> Result<LanguagePackPayload, String> {
+    pack.code = normalize_language_code(&pack.code);
+    if pack.code.is_empty() || pack.code == "auto" || is_core_language_code(&pack.code) {
+        return Err("Invalid language code".into());
+    }
+    if pack.messages.is_empty() {
+        return Err("Language pack has no messages".into());
+    }
+    if pack.label.trim().is_empty() {
+        pack.label = pack.code.to_uppercase();
+    }
+    if pack.native_name.trim().is_empty() {
+        pack.native_name = pack.label.clone();
+    }
+    if pack.generated_at.trim().is_empty() {
+        pack.generated_at = Utc::now().to_rfc3339();
+    }
+    if pack.source.trim().is_empty() {
+        pack.source = "generated".into();
+    }
+    pack.format = "clipanchor-language-pack".into();
+    pack.source_locale = "en".into();
+    pack.file_name = format!("{}.json", pack.code);
+
+    // 中文：保存时同步译文指纹并删除孤立状态项，是为了让下一次扫描能识别手动修改，同时避免被删文本的元数据长期堆积。
+    // English: Saving synchronizes translation fingerprints and removes orphaned status entries so the next scan detects manual edits without accumulating metadata for deleted copy.
+    let message_keys = pack.messages.keys().cloned().collect::<std::collections::HashSet<_>>();
+    pack.message_status.retain(|key, _| message_keys.contains(key));
+    for (key, value) in &pack.messages {
+        let current_translation_hash = language_source_hash(value);
+        let status = pack.message_status.entry(key.clone()).or_default();
+        status.translation_hash = current_translation_hash;
+    }
+
+    pack.integrity = "complete".into();
+    pack.missing_keys.clear();
+    pack.outdated_keys.clear();
+    pack.removed_keys.clear();
+    pack.integrity_error.clear();
+    let directory = language_pack_dir(&state);
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    let output = directory.join(&pack.file_name);
+    let text = serde_json::to_string_pretty(&pack).map_err(|error| error.to_string())?;
+    // 中文：生成语言包写入 data/locales，是为了让用户可备份、可编辑，同时避免机器翻译混入内置语言源码。
+    // English: Generated packs are stored in data/locales so users can back them up or edit them without mixing machine translations into built-in sources.
+    fs::write(&output, text).map_err(|error| error.to_string())?;
+    app_log::info(&state.paths, "i18n", format!("saved generated language pack {} with {} message(s)", pack.code, pack.messages.len()));
+    Ok(pack)
+}
+
+
+#[tauri::command]
+pub fn delete_language_pack(code: String, state: State<'_, AppState>) -> Result<bool, String> {
+    let normalized = normalize_language_code(&code);
+    if normalized.is_empty() || normalized == "auto" || is_core_language_code(&normalized) {
+        return Err("Invalid language code".into());
+    }
+    let directory = language_pack_dir(&state);
+    let target = directory.join(format!("{}.json", normalized));
+    if !target.exists() {
+        app_log::warn(&state.paths, "i18n", format!("delete generated language pack requested but file is missing: {}", normalized));
+        return Ok(false);
+    }
+    // 删除只允许命中 data/locales 下的标准语言包文件，是为了让用户能安全清理机器翻译结果而不会误删内置语言源码。
+    // Deletion is restricted to standard pack files under data/locales so users can safely clean generated translations without touching built-in locale sources.
+    fs::remove_file(&target).map_err(|error| error.to_string())?;
+    app_log::info(&state.paths, "i18n", format!("deleted generated language pack {}", normalized));
+    Ok(true)
+}
+
+
+#[tauri::command]
+pub fn log_language_pack_event(
+    event: String,
+    code: String,
+    provider: Option<String>,
+    success: Option<bool>,
+    detail: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let normalized_code = normalize_language_code(&code);
+    let safe_event = event.chars().filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.')).take(60).collect::<String>();
+    let safe_provider = provider.unwrap_or_default().chars().filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ' ')).take(80).collect::<String>();
+    let safe_detail = detail.unwrap_or_default().replace('\r', " ").replace('\n', " ").chars().take(220).collect::<String>();
+    let outcome = success.map(|value| if value { "ok" } else { "failed" }).unwrap_or("noted");
+    let message = format!(
+        "language event={} code={} provider={} outcome={} detail={}",
+        if safe_event.is_empty() { "unknown" } else { safe_event.as_str() },
+        if normalized_code.is_empty() { "none" } else { normalized_code.as_str() },
+        if safe_provider.is_empty() { "none" } else { safe_provider.as_str() },
+        outcome,
+        if safe_detail.is_empty() { "none" } else { safe_detail.as_str() }
+    );
+    // 语言包生成涉及第三方翻译接口，只记录语言代号和阶段结果，避免把具体界面文案或用户数据写入日志。
+    // Language pack generation touches third-party translation APIs, so only locale codes and stage outcomes are logged instead of UI strings or user data.
+    if success == Some(false) {
+        app_log::warn(&state.paths, "i18n", message);
+    } else {
+        app_log::info(&state.paths, "i18n", message);
+    }
+    Ok(())
+}
+
+
+#[tauri::command]
+pub fn translate_ui_text(provider: String, target_code: String, text: String, api_key: Option<String>, state: State<'_, AppState>) -> Result<String, String> {
+    let normalized_provider = provider.trim().to_ascii_lowercase();
+    let normalized_target = normalize_language_code(&target_code);
+    if text.trim().is_empty() {
+        return Ok(text);
+    }
+    if normalized_target.is_empty() {
+        return Err("Invalid target language".into());
+    }
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(24))
+        .user_agent("ClipAnchor-i18n/desktop")
+        .build()
+        .map_err(|error| error.to_string())?;
+    match normalized_provider.as_str() {
+        "uapis" => translate_with_uapis(&client, &normalized_target, &text, api_key.as_deref().unwrap_or_default(), &state),
+        _ => translate_with_mymemory(&client, &normalized_target, &text, api_key.as_deref().unwrap_or_default(), &state),
+    }
+}
+
+fn translate_with_mymemory(client: &reqwest::blocking::Client, target_code: &str, text: &str, api_key: &str, state: &State<'_, AppState>) -> Result<String, String> {
+    let langpair = format!("en|{}", target_code);
+    // 这里不用 RequestBuilder::query，是因为当前 reqwest 版本的 blocking builder 没有暴露该方法；提前构造 URL 可以保持相同请求语义并避免编译失败。
+    // RequestBuilder::query is intentionally avoided because the current reqwest blocking builder does not expose it; pre-building the URL keeps the same request semantics and prevents compilation failure.
+    let api_key = api_key.trim();
+    let mut params = vec![("q", text), ("langpair", langpair.as_str())];
+    if !api_key.is_empty() {
+        // MyMemory 的公开接口用 de 参数标识调用者，是为了在用户提供凭据时使用更稳定的调用配额，同时不改变免费匿名模式。
+        // MyMemory's public endpoint uses the de parameter to identify callers, enabling a more stable quota when the user provides credentials while keeping anonymous free mode unchanged.
+        params.push(("de", api_key));
+    }
+    let url = reqwest::Url::parse_with_params(
+        "https://api.mymemory.translated.net/get",
+        &params,
+    )
+    .map_err(|error| error.to_string())?;
+    let response = client
+        .get(url)
+        .send()
+        .map_err(|error| format!("NETWORK_ERROR: {}", error))?;
+    let status = response.status();
+    let payload = response.text().map_err(|error| error.to_string())?;
+    if !status.is_success() {
+        if status.as_u16() == 429 {
+            return Err("TRANSLATION_RATE_LIMITED".into());
+        }
+        return Err(format!("{} {}", status.as_u16(), summarize_http_payload(&payload)));
+    }
+    let value: serde_json::Value = serde_json::from_str(&payload).map_err(|error| error.to_string())?;
+    extract_json_text(&value, &[&["responseData", "translatedText"], &["translatedText"], &["matches", "0", "translation"]])
+        .filter(|translated| !translated.trim().is_empty())
+        .ok_or_else(|| {
+            app_log::warn(&state.paths, "i18n", "MyMemory response did not contain translated text");
+            "Translation response is missing translated text".to_string()
+        })
+}
+
+fn translate_with_uapis(client: &reqwest::blocking::Client, target_code: &str, text: &str, api_key: &str, state: &State<'_, AppState>) -> Result<String, String> {
+    let api_key = api_key.trim();
+    // UAPI 把目标语言定义为 URL 查询参数，正文只接收 text；严格按该契约发送，避免服务端计数成功但实际没有返回翻译结果。
+    // UAPI defines the target locale as a URL query parameter and accepts only text in the JSON body; following that contract prevents counted requests that return no usable translation.
+    let url = reqwest::Url::parse_with_params(
+        "https://uapis.cn/api/v1/translate/text",
+        &[("to_lang", target_code)],
+    )
+    .map_err(|error| error.to_string())?;
+    let mut request = client
+        .post(url)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .json(&serde_json::json!({ "text": text }));
+    if !api_key.is_empty() {
+        // UAPI 的标准鉴权使用 Bearer 令牌；只发送官方头部，是为了避免密钥被重复投递到未定义的自定义头。
+        // UAPI uses standard Bearer authentication; sending only the documented header avoids duplicating a secret into an undefined custom header.
+        request = request.header(reqwest::header::AUTHORIZATION, format!("Bearer {}", api_key));
+    }
+    let response = request
+        .send()
+        .map_err(|error| format!("NETWORK_ERROR: {}", error))?;
+    let status = response.status();
+    let request_id = response
+        .headers()
+        .get("x-request-id")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let payload = response.text().map_err(|error| error.to_string())?;
+    if !status.is_success() {
+        if status.as_u16() == 429 {
+            return Err("TRANSLATION_RATE_LIMITED".into());
+        }
+        let suffix = if request_id.is_empty() { String::new() } else { format!(" request-id={}", request_id) };
+        return Err(format!("{} {}{}", status.as_u16(), summarize_http_payload(&payload), suffix));
+    }
+    let value: serde_json::Value = serde_json::from_str(&payload).map_err(|error| error.to_string())?;
+    extract_json_text(&value, &[
+        &["data", "translated_text"],
+        &["data", "translatedText"],
+        &["data", "translation"],
+        &["data", "translate"],
+        &["data", "result"],
+        &["data", "text"],
+        &["result", "translated_text"],
+        &["result", "translatedText"],
+        &["result", "translation"],
+        &["result", "text"],
+        &["result"],
+        &["translated_text"],
+        &["translatedText"],
+        &["translation"],
+        &["translate"],
+    ])
+    .or_else(|| find_translation_string(&value))
+    .filter(|translated| !translated.trim().is_empty())
+    .ok_or_else(|| {
+        app_log::warn(&state.paths, "i18n", format!("UAPI response did not contain translated text; keys={}", summarize_json_keys(&value)));
+        "Translation response is missing translated text".to_string()
+    })
+}
+
+
+fn extract_json_text(value: &serde_json::Value, paths: &[&[&str]]) -> Option<String> {
+    if let Some(text) = value.as_str() {
+        return Some(text.to_string());
+    }
+    for path in paths {
+        let mut current = Some(value);
+        for segment in *path {
+            current = current.and_then(|node| {
+                if let Ok(index) = segment.parse::<usize>() {
+                    node.get(index)
+                } else {
+                    node.get(*segment)
+                }
+            });
+            if current.is_none() {
+                break;
+            }
+        }
+        if let Some(text) = current.and_then(serde_json::Value::as_str) {
+            return Some(text.to_string());
+        }
+    }
+    None
+}
+
+fn find_translation_string(value: &serde_json::Value) -> Option<String> {
+    const TRANSLATION_KEYS: &[&str] = &[
+        "translated_text",
+        "translatedText",
+        "translation",
+        "translate",
+    ];
+    match value {
+        serde_json::Value::Object(object) => {
+            for key in TRANSLATION_KEYS {
+                if let Some(text) = object.get(*key).and_then(serde_json::Value::as_str) {
+                    return Some(text.to_string());
+                }
+            }
+            for key in ["data", "result"] {
+                if let Some(found) = object.get(key).and_then(find_translation_string) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        serde_json::Value::Array(values) => values.iter().find_map(find_translation_string),
+        _ => None,
+    }
+}
+
+
+fn summarize_json_keys(value: &serde_json::Value) -> String {
+    value.as_object()
+        .map(|object| object.keys().take(8).cloned().collect::<Vec<_>>().join(","))
+        .unwrap_or_else(|| "non-object".into())
+}
+
+fn summarize_http_payload(payload: &str) -> String {
+    let mut compact = payload.replace('\r', " ").replace('\n', " ");
+    compact.truncate(120);
+    compact
+}
+
 #[tauri::command]
 pub fn get_bootstrap(state: State<'_, AppState>) -> Result<BootstrapPayload, String> {
-    let settings = state.settings.lock().map_err(|error| error.to_string())?.clone();
+    let mut settings_guard = state.settings.lock().map_err(|error| error.to_string())?;
+    let actual_autostart = match autostart::reconcile(settings_guard.auto_start, &state.paths.root) {
+        Ok(actual) => actual,
+        Err(error) => {
+            // 注册表状态读取失败不应阻断整个主界面加载；保留上次设置并记录错误，用户仍可进入设置页再次操作修复。
+            // A registry-state read failure must not block the entire main UI; keeping the last setting and logging the error lets the user reopen Settings and retry the repair.
+            app_log::warn(
+                &state.paths,
+                "autostart",
+                format!("system autostart state could not be read: {}", error),
+            );
+            settings_guard.auto_start
+        }
+    };
+    if actual_autostart != settings_guard.auto_start {
+        // 设置页加载时再次读取系统状态，是为了捕获用户在任务管理器中刚做出的切换，而无需重启客户端才能看到正确开关。
+        // Reading the OS state again when Settings loads captures a recent Task Manager toggle without requiring the client to restart before showing the correct switch.
+        settings_guard.auto_start = actual_autostart;
+        settings::save(&state.paths, &settings_guard)?;
+    }
+    let settings = settings_guard.clone();
+    drop(settings_guard);
     Ok(BootstrapPayload {
         settings,
         paths: PathPayload {
@@ -109,11 +671,15 @@ pub fn get_bootstrap(state: State<'_, AppState>) -> Result<BootstrapPayload, Str
 }
 
 #[tauri::command]
-pub fn save_settings(settings_value: AppSettings, app: AppHandle, state: State<'_, AppState>) -> Result<AppSettings, String> {
+pub fn save_settings(mut settings_value: AppSettings, app: AppHandle, state: State<'_, AppState>) -> Result<AppSettings, String> {
+    settings::normalize_translation_settings(&mut settings_value, true);
     validate_shortcuts(&settings_value)?;
     app_log::info(&state.paths, "settings", "saving settings from UI");
     {
         let mut guard = state.settings.lock().map_err(|error| error.to_string())?;
+        if guard.locale != settings_value.locale {
+            app_log::info(&state.paths, "i18n", format!("active language changed from {} to {}", guard.locale, settings_value.locale));
+        }
         *guard = settings_value.clone();
         settings::save(&state.paths, &settings_value)?;
     }
@@ -184,6 +750,9 @@ pub fn set_autostart(enabled: bool, app: AppHandle, state: State<'_, AppState>) 
     autostart::apply(enabled, &state.paths.root)?;
     let updated = update_settings_flag(&state, |settings| settings.auto_start = enabled)?;
     let _ = crate::tray::refresh_tray(&app);
+    // 自启动状态也广播统一设置事件，是为了让同一进程内的设置页、托盘和其他窗口立即使用同一个真实值。
+    // Autostart also emits the shared settings event so Settings, tray, and other windows in the same process immediately use one authoritative value.
+    let _ = app.emit("clipanchor-settings-changed", updated.clone());
     Ok(updated)
 }
 
@@ -498,7 +1067,16 @@ pub fn close_popup(id: String, app: AppHandle, state: State<'_, AppState>) -> Re
 
 #[tauri::command]
 pub fn pin_popup(id: String, app: AppHandle) -> Result<(), String> {
-    if let Some(state) = app.try_state::<AppState>() { app_log::info(&state.paths, "popup", format!("pin popup requested: {}", id)); }
+    if let Some(state) = app.try_state::<AppState>() {
+        app_log::info(&state.paths, "popup", format!("pin popup requested: {}", id));
+        if let Ok(mut items) = state.temp_items.lock() {
+            if let Some(item) = items.get_mut(&id) {
+                // 后端也记录弹窗置顶状态，是为了重复复制时能保留已 Pin 窗口，而不是把它误当成普通临时弹窗关闭。
+                // The backend also records popup pin state so duplicate copies keep an already pinned window instead of treating it as a disposable transient popup.
+                item.is_pinned = true;
+            }
+        }
+    }
     popup::pin_popup(&app, &id)
 }
 

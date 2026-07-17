@@ -1,148 +1,262 @@
-<div align="center">
-  <img src="src-tauri/icons/128x128.png" width="92" height="92" alt="ClipAnchor logo" />
-  <h1>ClipAnchor · 剪贴锚</h1>
-  <p><strong>A portable, quiet, pinnable clipboard workspace for modern desktops</strong></p>
-  <p><a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a></p>
-</div>
+# ClipAnchor
 
-## Overview
+English | [简体中文](README.zh-CN.md)
 
-ClipAnchor is a cross-platform clipboard pinning tool built with Rust, Tauri, and React. It monitors copied text, images, and files in the background, turns them into compact desktop popups, and saves non-sensitive content into local history. Important items can be favorited, pinned again, copied back to the clipboard, searched, and managed from the history list.
+ClipAnchor is a desktop clipboard companion built with **Tauri + React**. It focuses on clipboard previews, pinned floating content, history, favorites, privacy filtering, shortcuts, and extensible local language packs. The application is designed primarily around local execution and local data storage.
 
-## AI development notice
-
-This project was implemented with AI-assisted programming. Before public release or production use, review the code, test every target platform, verify clipboard capture, popup, history, autostart, installer, and update behavior with your own sample set, and confirm all third-party binary licenses.
-
-## Current Verification Status
-
-| Platform      | Status | Notes |
-| ------------- | ------ | ----- |
-| Windows x64   | Verified | Basic desktop, tray, clipboard, history, update, and CLI smoke tests passed. |
-| Windows ARM64 | Pending | Needs real-device package and runtime verification. |
-| macOS ARM64   | Verified | Apple Silicon APP/DMG runtime smoke tests passed. |
-| macOS x64     | Pending | Needs Intel macOS package and runtime verification. |
-| Linux x64     | Pending | Needs DEB/RPM package and desktop-environment verification. |
-| Linux ARM64   | Pending | Needs ARM64 Linux package and runtime verification. |
-
-This table is a compact release checklist. Re-test long-running background behavior, autostart Lite mode, installer handoff, and update delivery before publishing a new build.
-
-ClipAnchor is designed to stay portable and quiet. Runtime data is stored beside the application under `data/`, which makes backup and migration straightforward. When launched at system startup, ClipAnchor enters Lite mode by default: no main window is shown, while the tray icon, clipboard monitor, and database service keep running silently.
-
-## Project layout
-
-| Path | Purpose |
-|---|---|
-| `src/index.html` | Vite entry for the desktop app. The source entry lives under `src/`; production builds still emit `dist/index.html` for Tauri main and popup windows. |
-| `src/` | React frontend, including the main shell, clipboard page, settings page, popup page, API wrapper, and global styles. |
-| `src-tauri/` | Rust/Tauri backend for clipboard monitoring, database access, tray, autostart, shortcuts, single instance, and window control. |
-| `data/` | Portable data directory for the database, settings, resources, exports, and logs. |
-| `docs/index.html` | Standalone website for GitHub Pages or static hosting. It is not part of the desktop runtime. |
-| `scripts/` | Scripts for release collection and portable package creation. |
-| `release/` | Distribution folder where installers and portable archives are copied after build. |
+> ClipAnchor is under active development. Before installing or upgrading, review the release notes and back up any important local data.
 
 ## Features
 
-| Area | Capability |
-|---|---|
-| Pinned popups | Creates an independent desktop popup for every copy action, with Pin, Copy, Unpin, auto-destroy, drag, and smart stacking. |
-| Lite mode | Startup launch runs silently without showing the main window; the UI can be restored from tray or shortcut. |
-| Single instance | Relaunching ClipAnchor activates and foregrounds the existing main window instead of leaving another long-running process. |
-| History | Local SQLite history with search, type filters, single delete, batch delete, and pin-from-history. |
-| Favorites | Favorite items are shown separately and still remain in normal history; normal cleanup keeps them by default. |
-| Privacy filter | Off, light, and smart modes; light mode uses local rules to detect common sensitive content patterns. |
-| Shortcuts | Global actions for pin service, history service, show/hide main window, Lite mode, and pause/resume monitoring. |
-| Data tools | Import/export JSON or metadata-complete CSV history, clean records by age, show database location, and manage rotated runtime logs. |
-| Appearance | Dark, light, and system themes, UI scale, popup scale, and animation mode. |
-| Portable data | History, settings, resources, exports, and logs stay inside `data/`. |
+- Text, image, file, and mixed clipboard content.
+- Lightweight clipboard preview windows with pin, unpin, and close actions.
+- Searchable clipboard history, favorites, deletion, and cleanup.
+- Editable text records and history import/export.
+- Privacy mode, content-type filters, and configurable auto-destroy delay.
+- Global shortcuts, light/dark/system themes, and UI scaling.
+- Autostart, tray operation, remembered window position, and update checks.
+- Built-in English and Simplified Chinese.
+- Local extension language packs with incremental update support.
+- Reuse of unchanged translations to reduce unnecessary translation API calls.
 
-## Quick start
+## Download and Install
 
-### Development
+### Use a release build
 
-```bash
-git clone https://github.com/SELFEMO/ClipAnchor.git
-cd ClipAnchor
-npm install --registry=https://registry.npmmirror.com
-npm run desktop:dev
-```
+1. Open the repository's **Releases** page.
+2. Download the package that matches your operating system and CPU architecture.
+3. Install or extract the package, then start ClipAnchor.
+4. Use Settings to configure shortcuts, privacy filters, theme, language, and popup lifetime.
 
-Run `npm install` and `npm run desktop:dev` inside the cloned `ClipAnchor` directory. The command fails with `Could not read package.json` if it is executed from the parent folder. Use `npm run clean` when a clean rebuild is needed; it replaces shell-specific `rm -rf` cleanup and avoids intermittent `Directory not empty` failures on macOS. On Windows, install Rust, Node.js, Microsoft Visual Studio Build Tools, and WebView2 Runtime before development. The project includes `.cargo/config.toml`, so Cargo uses a sparse mirror by default, which helps in networks where crates.io is unstable.
+When no package is published for a platform, build the application from source.
 
+### Portable data directory
 
-### Check installed version
-
-```powershell
-clipanchor.exe --version
-clipanchor.exe -V
-```
-
-On macOS and Linux, use the same flags with the installed `clipanchor` binary. The command prints the application version and exits immediately, so it does not open the main window or start the clipboard service.
-
-### Build installers
-
-```bash
-npm run desktop:build
-```
-
-For Apple Silicon on a macOS host, add the target once and build the ARM64 bundle:
-
-```bash
-rustup target add aarch64-apple-darwin
-npm run desktop:build:macos-arm64
-```
-
-Tauri writes installers to `src-tauri/target/release/bundle/` or `src-tauri/target/<target-triple>/release/bundle/` for target-specific builds. The project scripts copy distributable artifacts into the root `release/` folder for easier publishing.
-
-Linux targets are DEB and RPM. Windows targets include NSIS and MSI installers. macOS targets include APP and DMG. macOS DMG creation should be run on macOS, then signed and notarized with your own Apple Developer certificate before public distribution.
-
-## Basic usage
-
-1. Start ClipAnchor and make sure Pin Service and History Service are enabled.
-2. Copy text, images, or files to create compact desktop popups.
-3. Click Pin to keep a popup above other windows and reveal actions such as Copy and Unpin.
-4. Search history in the Clipboard page, favorite important records, or click the Pin icon to create a pinned popup from history.
-5. Use Settings to adjust theme, language, scale, shortcuts, popup position, privacy filtering, and cleanup behavior.
-6. After enabling launch-at-startup, ClipAnchor signs in silently in Lite mode; double-click the tray icon, choose Show ClipAnchor, or press `Ctrl+Shift+X` to restore the main window.
-
-## Data location
-
-ClipAnchor stores runtime data beside the application:
+A portable build normally stores runtime data beside the application:
 
 ```text
 data/
-├── clipanchor.db
-├── settings.json
-├── resources/
-├── exports/        # JSON and CSV history exports include record metadata.
-└── logs/
-    ├── clipanchor.log
-    └── clipanchor-*.log
+├── locales/     # User extension language packs
+├── logs/        # Logs
+└── ...          # Settings, history, and other runtime data
 ```
 
-Logs rotate automatically when the current file grows too large. Settings → Log management includes log size, configurable retention days, log folder access, refresh, and cleanup controls.
+Do not publish the `data/` directory. It may contain personal settings, logs, or clipboard data.
 
-Move the whole project or installation folder to migrate history and settings together. Back up important data before deleting `data/`.
+## Run from Source
 
-## Update channel
+### Requirements
 
-ClipAnchor can silently check GitHub Releases at startup when **Auto update** is enabled in Settings. Startup checks do not open the update card for checking, no-update, generic failures, or releases that do not contain a compatible package. The foreground prompt appears only when an update is actionable, such as a compatible package is ready to install, or a compatible package exists but automatic download failed and the user must choose whether to open the release asset.
+- Node.js and npm
+- Rust toolchain
+- System build dependencies required by Tauri
+- Git
 
-The manual **Check update** button always opens an in-app status card immediately, then shows checking, downloading, ready-to-install, no-update, incompatible-asset, or failure states. Release tags should use `pre-release-v...` or `release-v...`. Asset selection is automatic: Windows prefers `ClipAnchor_Windows_x64.exe`; if no EXE exists, it chooses a localized MSI such as `ClipAnchor_Windows_x64_zh-CN.msi` or `ClipAnchor_Windows_x64_en-US.msi`. macOS uses DMG and now filters architecture-specific names so Apple Silicon selects ARM64 or universal packages instead of Intel-only packages. Linux selects DEB or RPM according to the distribution family. Before each new check, old packages in `data/updates/` are removed so stale installers cannot be reused accidentally. Newly downloaded packages are stored in `data/updates/` and opened through the system installer when the user chooses **Install now**.
+Platform-specific system dependencies differ. Configure a working Tauri desktop development environment before building.
 
-## Release artifact names
+### Install dependencies
 
-The release scripts try to organize installers with names like:
+```bash
+npm install
+```
+
+### Development mode
+
+```bash
+npm run tauri:dev
+```
+
+### Build release packages
+
+```bash
+npm run tauri:build
+```
+
+If script names change, use the current entries in `package.json`.
+
+## Basic Usage
+
+1. Start ClipAnchor.
+2. Enable the clipboard pin service and history service in Settings.
+3. Copy text, an image, or files.
+4. Pin the preview when it should remain visible, or let an unpinned preview close automatically.
+5. Search, favorite, copy, edit, or delete records in the main window.
+6. Configure shortcuts, appearance, language, scaling, filters, and retention rules in Settings.
+
+## Extension Language Packs
+
+### Built-in and extension languages
+
+Built-in language ranges:
+
+- `en`: English
+- `zh-CN` / `zh-Hans`: Simplified Chinese
+
+Other languages are loaded from JSON extension packs. Place each pack in:
 
 ```text
-ClipAnchor_Windows_x64.msi
-ClipAnchor_Windows_x64.exe
-ClipAnchor_macOS_arm64.dmg
-ClipAnchor_Linux_x64.deb
-ClipAnchor_Linux_x64.rpm
+data/locales/
 ```
 
-Actual output depends on the host operating system, CPU architecture, and installed Tauri bundling toolchain.
+After copying the file, **fully quit and restart ClipAnchor**. The language will then appear under Settings → Appearance → Extension languages.
+
+### Files to use as references
+
+- Authoritative English keys and source text: [`src/locales/en.js`](src/locales/en.js)
+- JSON template: [`docs/i18n/language-pack.template.json`](docs/i18n/language-pack.template.json)
+- Detailed guide: [`docs/i18n/README.md`](docs/i18n/README.md)
+
+Use the keys in the `messages` object from `src/locales/en.js`. **Translate values only. Do not translate, delete, or arbitrarily rename keys.**
+
+### File names and language tags
+
+A language-pack filename must use an **IETF BCP 47-style** language tag and the `.json` extension.
+
+Examples:
+
+| Language | Filename |
+|---|---|
+| Japanese | `ja.json` |
+| French | `fr.json` |
+| German | `de.json` |
+| Spanish | `es.json` |
+| Brazilian Portuguese | `pt-BR.json` |
+| Traditional Chinese, Taiwan | `zh-TW.json` |
+| Serbian, Latin script | `sr-Latn.json` |
+
+Rules:
+
+- Use hyphens (`-`), not underscores (`_`).
+- Primary language subtags are normally lowercase, such as `fr` and `ja`.
+- Script subtags use title case, such as `Latn` and `Hant`.
+- Region subtags are normally uppercase, such as `BR` and `TW`.
+- Do not use spaces or display names in filenames.
+- The JSON `code` should match the filename without `.json`.
+- `auto`, `en`, `en-*`, `zh`, `zh-CN`, and `zh-Hans*` are reserved for automatic or built-in language handling and should not be used as ordinary extension-pack names.
+
+### Minimum compatible structure
+
+```json
+{
+  "format": "clipanchor-language-pack",
+  "code": "fr",
+  "label": "French",
+  "native_name": "Français",
+  "source": "manual",
+  "source_locale": "en",
+  "messages": {
+    "settings": "Paramètres",
+    "cancel": "Annuler",
+    "ok": "OK"
+  },
+  "message_status": {}
+}
+```
+
+A real pack should contain every UI key from `src/locales/en.js`. The example above only demonstrates the structure and is not a complete production pack.
+
+Requirements:
+
+- Save the file as UTF-8.
+- Use valid JSON: no comments and no trailing commas.
+- `messages` must be an object with string keys and string values.
+- Preserve placeholders such as `{language}`, `{count}`, `{error}`, and `{days}`.
+- Preserve escape semantics. Use `\n` for a newline and `\"` for a quotation mark inside JSON strings.
+- Never store API keys, clipboard data, or other private information in a language pack.
+- `message_status` may initially be empty. ClipAnchor can establish compatibility metadata when it first scans a legacy or manually created pack.
+
+### How ClipAnchor decides whether an entry needs an update
+
+ClipAnchor compares every extension-language entry with the current English reference messages:
+
+| State | Detection | Result |
+|---|---|---|
+| Missing entry | The English key exists but is absent from `messages` | Add to the incremental update set |
+| Changed source | The current English text hash differs from stored `source_hash` | Mark as outdated |
+| Removed entry | The pack contains a key no longer present in English | Remove locally during update without calling a translation API |
+| Manual edit | Current translation hash differs from stored `translation_hash` | Set `modified: true` to protect the human-edited value |
+| Damaged file | JSON cannot be parsed, the structure is invalid, or no usable messages exist | Mark as corrupt and require repair/regeneration |
+
+`source_hash` and `translation_hash` are lightweight change fingerprints, not cryptographic security hashes.
+
+Incremental-update policy:
+
+1. Translate only missing entries and entries whose English source changed.
+2. Reuse unchanged translations.
+3. Remove retired keys locally.
+4. Preserve detected human edits instead of overwriting them automatically.
+5. When the English source of a human-edited entry later changes, the translator should manually review the entry for semantic compatibility.
+
+## Language-Pack Troubleshooting
+
+- **Update available** means the pack is still usable but contains missing, changed, or removed keys.
+- **File error/corrupt** means the JSON cannot be safely loaded and should be repaired or regenerated.
+- Language does not appear:
+  1. Confirm the file is in `data/locales/`.
+  2. Confirm the extension is `.json`.
+  3. Confirm the filename is a valid language tag.
+  4. Validate the JSON.
+  5. Fully quit ClipAnchor from the tray and restart it.
+- English fallback text usually means that one or more keys are missing.
+- Broken placeholders usually mean that an original `{...}` token was changed or removed.
+
+## Project Layout
+
+```text
+ClipAnchor/
+├── src/                    # React frontend
+│   ├── locales/            # Built-in languages
+│   ├── pages/              # Main pages
+│   └── popup/              # Clipboard preview window
+├── src-tauri/              # Rust / Tauri backend
+├── scripts/                # Build and helper scripts
+├── docs/                   # Documentation and publishable static content
+├── data/                   # Local runtime data; do not publish
+├── README.md
+└── README.zh-CN.md
+```
+
+## Privacy and Data Safety
+
+ClipAnchor processes copied text, images, and file paths. Keep the following in mind:
+
+- Avoid retaining sensitive clipboard content on shared devices.
+- Enable privacy filters and cleanup rules that match your workflow.
+- Remove private paths, tokens, and clipboard text before publishing logs or issues.
+- Never commit `data/`, `.env` files, API keys, signing certificates, or local build credentials.
+- Back up records that must be retained before deleting local data.
+
+## Reporting Issues
+
+A useful issue report includes:
+
+- Operating system and version.
+- ClipAnchor version.
+- Reproduction steps.
+- Expected and actual behavior.
+- Sanitized logs.
+- Screenshots or recordings when necessary.
+
+Do not publish clipboard contents, access tokens, private paths, or other sensitive information.
+
+## Contributing
+
+1. Fork the repository and create a focused branch.
+2. Install dependencies and verify that development mode starts.
+3. Keep English and Simplified Chinese message keys synchronized.
+4. Update both built-in languages when UI copy changes.
+5. Verify incremental extension-pack behavior after adding English keys.
+6. Run available build, formatting, and static checks before committing.
+7. Open a pull request with a clear change summary and validation notes.
+
+Recommended commit style:
+
+```text
+feat: add clipboard filter
+fix: preserve manually edited translations
+docs: improve language-pack guide
+```
 
 ## License
 
-ClipAnchor is licensed under the Apache License 2.0. See the root `LICENSE` file for the full license text.
+See the repository's [`LICENSE`](LICENSE) file for the applicable license terms.

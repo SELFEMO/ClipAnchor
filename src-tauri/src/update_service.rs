@@ -184,6 +184,7 @@ pub fn install_downloaded_update(app: &AppHandle, paths: &DataPaths) -> Result<U
     let _ = save_status(paths, &status);
     app_log::info(paths, "update", installer_handoff_log_message(quit_after_launch));
     if quit_after_launch {
+        let _ = crate::window_control::save_main_window_position(app);
         app.exit(0);
     }
     Ok(status)

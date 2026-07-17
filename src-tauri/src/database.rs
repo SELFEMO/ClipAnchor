@@ -2,6 +2,12 @@ use crate::{clipboard_service, models::{ClipItem, ClipKind, HistoryRecord}, path
 use chrono::{Duration, Utc};
 use rusqlite::{params, Connection};
 
+#[derive(Clone, Debug)]
+pub struct CaptureSaveOutcome {
+    pub record: HistoryRecord,
+    pub was_duplicate: bool,
+}
+
 fn conn(paths: &DataPaths) -> Result<Connection, String> {
     Connection::open(&paths.database).map_err(|error| error.to_string())
 }
@@ -96,8 +102,8 @@ fn backfill_content_hash(db: &Connection) -> Result<(), String> {
         }
     }
     for (id, content_hash) in pending {
-        // 回填旧记录的哈希后，后续复制同内容时才能删除旧项并只保留最新项。
-        // Backfilled hashes let later copies remove older duplicates and keep only the newest item.
+        // 回填旧记录的哈希后，后续复制同内容时才能刷新旧项并移动到最前面。
+        // Backfilled hashes let later copies refresh older matches and move them to the front.
         db.execute("UPDATE records SET content_hash = ?1 WHERE id = ?2", params![content_hash, id]).map_err(|error| error.to_string())?;
     }
     Ok(())
@@ -116,26 +122,41 @@ fn hash_existing_record(kind: &str, text_content: Option<String>, image_path: Op
 }
 
 pub fn insert(paths: &DataPaths, item: &ClipItem) -> Result<(), String> {
+    let _ = insert_or_refresh(paths, item)?;
+    Ok(())
+}
+
+pub fn insert_or_refresh(paths: &DataPaths, item: &ClipItem) -> Result<CaptureSaveOutcome, String> {
     let db = conn(paths)?;
     ensure_columns(&db)?;
     backfill_content_hash(&db)?;
     let file_paths = serde_json::to_string(&item.file_paths).map_err(|error| error.to_string())?;
-    let inherited_pinned = remove_duplicate_records(&db, item)?;
-    let is_pinned = item.is_pinned || inherited_pinned;
 
-    // 写入前先删除同内容旧记录，是为了让历史记录按“最新复制”排序且不会堆积重复项。
-    // Older records with the same content are removed before insert so history reflects the latest copy without duplicate clutter.
+    if let Some(existing) = duplicate_record_to_refresh(&db, item)? {
+        let existing_id = existing.id.clone();
+        let is_pinned = existing.is_pinned || item.is_pinned;
+        // 重复捕获时刷新旧记录而不是删除重建，是为了保留历史项身份与已收藏状态，同时让列表按最新复制时间前置。
+        // Duplicate captures refresh the existing record instead of deleting and recreating it, preserving identity/favorite state while moving it to the latest position.
+        db.execute(
+            "UPDATE records SET summary = ?1, text_content = ?2, image_path = ?3, file_paths = ?4, bytes = ?5, created_at = ?6, content_hash = ?7, is_pinned = ?8 WHERE id = ?9",
+            params![item.summary, item.text_content, item.image_path, file_paths, item.bytes, item.created_at, item.content_hash, is_pinned as i32, existing_id]
+        ).map_err(|error| error.to_string())?;
+        remove_extra_duplicate_records(&db, item, &existing_id)?;
+        let record = get(paths, &existing_id)?.ok_or_else(|| "Record not found after refresh".to_string())?;
+        return Ok(CaptureSaveOutcome { record, was_duplicate: true });
+    }
+
     db.execute(
         "INSERT OR REPLACE INTO records (id, kind, summary, text_content, image_path, file_paths, bytes, created_at, content_hash, is_pinned)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        params![item.id, kind_to_string(&item.kind), item.summary, item.text_content, item.image_path, file_paths, item.bytes, item.created_at, item.content_hash, is_pinned as i32]
+        params![item.id, kind_to_string(&item.kind), item.summary, item.text_content, item.image_path, file_paths, item.bytes, item.created_at, item.content_hash, item.is_pinned as i32]
     ).map_err(|error| error.to_string())?;
-    Ok(())
+    let record = get(paths, &item.id)?.ok_or_else(|| "Record not found after save".to_string())?;
+    Ok(CaptureSaveOutcome { record, was_duplicate: false })
 }
 
 pub fn upsert_text(paths: &DataPaths, item: &ClipItem) -> Result<HistoryRecord, String> {
-    insert(paths, item)?;
-    get(paths, &item.id)?.ok_or_else(|| "Record not found after save".to_string())
+    Ok(insert_or_refresh(paths, item)?.record)
 }
 
 pub fn update_text(paths: &DataPaths, id: &str, text: &str) -> Result<HistoryRecord, String> {
@@ -156,32 +177,44 @@ pub fn update_text(paths: &DataPaths, id: &str, text: &str) -> Result<HistoryRec
         content_hash: clipboard_service::content_hash_for_bytes("text", text.as_bytes()),
         is_pinned: existing.is_pinned,
     };
-    // 编辑文本时复用去重写入路径，是为了让“编辑后内容重复”也遵守只保留最新记录的规则。
-    // Text edits reuse the deduplicating write path so edited duplicates still keep only the newest record.
+    // 编辑文本时复用刷新写入路径，是为了让“编辑后内容重复”也只保留一个可继续追踪的历史项。
+    // Text edits reuse the refresh write path so edited duplicates still keep one traceable history item.
     upsert_text(paths, &item)
 }
 
-fn remove_duplicate_records(db: &Connection, item: &ClipItem) -> Result<bool, String> {
+fn duplicate_record_to_refresh(db: &Connection, item: &ClipItem) -> Result<Option<HistoryRecord>, String> {
     if item.content_hash.is_empty() {
-        return Ok(false);
+        return Ok(None);
     }
     let mut stmt = db.prepare(
-        "SELECT id, is_pinned FROM records WHERE kind = ?1 AND content_hash = ?2 AND id <> ?3"
+        "SELECT id, kind, summary, text_content, image_path, file_paths, bytes, created_at, content_hash, is_pinned
+         FROM records WHERE kind = ?1 AND content_hash = ?2 AND id <> ?3
+         ORDER BY is_pinned DESC, created_at DESC LIMIT 1"
     ).map_err(|error| error.to_string())?;
-    let duplicates = stmt.query_map(params![kind_to_string(&item.kind), item.content_hash, item.id], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)? != 0))
-    }).map_err(|error| error.to_string())?
-        .collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
-    if duplicates.is_empty() {
-        return Ok(false);
+    let mut rows = stmt.query(params![kind_to_string(&item.kind), item.content_hash, item.id]).map_err(|error| error.to_string())?;
+    if let Some(row) = rows.next().map_err(|error| error.to_string())? {
+        row_to_record(row).map(Some).map_err(|error| error.to_string())
+    } else {
+        Ok(None)
     }
-    let inherited_pinned = duplicates.iter().any(|(_, pinned)| *pinned);
-    for (id, _) in duplicates {
+}
+
+fn remove_extra_duplicate_records(db: &Connection, item: &ClipItem, keep_id: &str) -> Result<(), String> {
+    if item.content_hash.is_empty() {
+        return Ok(());
+    }
+    let mut stmt = db.prepare(
+        "SELECT id FROM records WHERE kind = ?1 AND content_hash = ?2 AND id <> ?3"
+    ).map_err(|error| error.to_string())?;
+    let duplicate_ids = stmt.query_map(params![kind_to_string(&item.kind), item.content_hash, keep_id], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+    for id in duplicate_ids {
+        // 只清掉异常遗留的额外重复行，是为了修复旧策略留下的数据，同时不再破坏被刷新的主记录身份。
+        // Only leftover duplicate rows are removed, repairing old data without destroying the refreshed primary record identity.
         db.execute("DELETE FROM records WHERE id = ?1", params![id]).map_err(|error| error.to_string())?;
     }
-    // 如果旧重复项是收藏项，将收藏状态转移到最新记录，既满足去重，又不会让用户的重要内容“消失”。
-    // If an older duplicate was favorited, the favorite state moves to the newest record, satisfying deduplication without losing important saved content.
-    Ok(inherited_pinned)
+    Ok(())
 }
 
 pub fn list(paths: &DataPaths, query: &str, kind: &str, limit: u32) -> Result<Vec<HistoryRecord>, String> {

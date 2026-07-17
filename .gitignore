@@ -38,6 +38,11 @@ ClipAnchor.wiki/
 # 本地项目提示词/需求文件仅用于私人开发参考，不应提交到主项目仓库。
 ClipAnchor.md
 
+
+# Local staging area for user-supplied extension language JSON files.
+# 用户自行准备的扩展语言 JSON 暂存目录，仅保留在本地，不提交到 Git。
+/extension-locales/
+
 # Portable runtime data must stay local because it may contain private clipboard content.
 data/*
 !data/.gitkeep

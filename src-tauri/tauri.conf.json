@@ -23,7 +23,9 @@
         "minimizable": true,
         "maximizable": true,
         "closable": true,
-        "visible": false
+        "visible": false,
+        "shadow": false,
+        "center": true
       }
     ],
     "security": {

@@ -3,8 +3,9 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { listen } from '@tauri-apps/api/event';
 import { Copy, FileIcon, ImageIcon, Pencil, Pin, Star, Type, X } from 'lucide-react';
 import { api } from '../api.js';
-import { createTranslator } from '../i18n.js';
+import { createTranslator, getReferenceMessages } from '../i18n.js';
 import { resolveThemeClass, useDocumentThemeSync, useSystemThemePreference } from '../theme.js';
+import { useTransientScrollbar } from '../useTransientScrollbar.js';
 
 function kindIcon(kind) {
   if (kind === 'image') return <ImageIcon size={15} />;
@@ -27,6 +28,7 @@ function previewsFromPaths(paths = []) {
 }
 
 export default function PopupWindow({ id }) {
+  const fileListRef = useTransientScrollbar();
   const [item, setItem] = useState(null);
   const [settings, setSettings] = useState(null);
   const [pinned, setPinned] = useState(false);
@@ -40,6 +42,7 @@ export default function PopupWindow({ id }) {
   const [favorited, setFavorited] = useState(false);
   const [compactActions, setCompactActions] = useState(false);
   const [popupSize, setPopupSize] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  const [languagePacks, setLanguagePacks] = useState([]);
   const cardRef = useRef(null);
   const metricsFrameRef = useRef(null);
   const lastMetricsRef = useRef({ width: 0, height: 0 });
@@ -128,7 +131,11 @@ export default function PopupWindow({ id }) {
   }, [id]);
 
   useEffect(() => {
-    api.bootstrap().then((boot) => setSettings(boot.settings)).catch((error) => setLoadError(String(error)));
+    const requiredLanguageMessages = getReferenceMessages('en');
+    Promise.all([api.bootstrap(), api.listLanguagePacks(requiredLanguageMessages).catch(() => [])]).then(([boot, packs]) => {
+      setSettings(boot.settings);
+      setLanguagePacks(Array.isArray(packs) ? packs : []);
+    }).catch((error) => setLoadError(String(error)));
     api.getPopupItem(id).then((payload) => {
       setItem(payload);
       setPinned(Boolean(payload.is_pinned));
@@ -234,7 +241,7 @@ export default function PopupWindow({ id }) {
     </main>
   );
 
-  const t = createTranslator(settings.locale);
+  const t = createTranslator(settings.locale, languagePacks);
   const motionClass = settings.animation_mode === 'performance' ? 'motion-performance' : 'motion-elegant';
   const actionsVisible = !confirmUnpinOpen && (!settings.auto_hide_actions || hover);
   const isTextItem = item.kind === 'text';
@@ -337,7 +344,7 @@ export default function PopupWindow({ id }) {
           {hasFilePreview ? (
             <>
               <div className="popup-file-count">{item.summary || `${fileCount} ${t('file')}`} · {fileCount} {t('itemCount')}</div>
-              <div className={`popup-file-list ${filePreviews.length > 1 ? 'multi' : ''}`}>
+              <div ref={fileListRef} className={`popup-file-list scroll-area ${filePreviews.length > 1 ? 'multi' : ''}`}>
                 {visibleFilePreviews.map((file, index) => (
                   <div className="popup-file-row" key={`${file.path}-${index}`} title={file.path || file.name}>
                     {file.thumbnail_data_url ? <img src={file.thumbnail_data_url} alt={file.name} /> : <span>{file.is_image ? <ImageIcon size={17} /> : <FileIcon size={17} />}</span>}
