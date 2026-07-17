@@ -127,7 +127,6 @@ pub fn run() {
                 if let Some(state) = app.try_state::<AppState>() {
                     log_startup_issue(state.inner(), "macOS Quit menu requested application exit");
                 }
-                let _ = crate::window_control::save_main_window_position(app);
                 app.exit(0);
             }
             _ => {}
@@ -272,12 +271,9 @@ pub fn run() {
                     // Closing the main window only hides it to tray and keeps monitoring alive so idle or close-to-tray sessions do not kill background services.
                     api.prevent_exit();
                     let _ = window_control::hide_main_window(app_handle);
-                } else {
-                    let _ = window_control::save_main_window_position(app_handle);
-                    if let Some(state) = app_handle.try_state::<AppState>() {
-                        log_startup_issue(state.inner(), &format!("Application exit requested with code {:?}", code));
-                        clipboard_service::stop_monitor(state.inner());
-                    }
+                } else if let Some(state) = app_handle.try_state::<AppState>() {
+                    log_startup_issue(state.inner(), &format!("Application exit requested with code {:?}", code));
+                    clipboard_service::stop_monitor(state.inner());
                 }
             }
             RunEvent::WindowEvent { label, event: WindowEvent::CloseRequested { api, .. }, .. } if label == "main" => {

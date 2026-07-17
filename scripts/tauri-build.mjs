@@ -1,8 +1,17 @@
 import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 
 const targetIndex = process.argv.indexOf('--target');
 const targetTriple = targetIndex >= 0 ? process.argv[targetIndex + 1] : '';
 const isMacTarget = process.platform === 'darwin' || String(targetTriple).includes('apple-darwin');
+const cargoLockPath = join(process.cwd(), 'src-tauri', 'Cargo.lock');
+
+if (!existsSync(cargoLockPath)) {
+  console.error('Missing src-tauri/Cargo.lock. Restore it from Git before building: git restore src-tauri/Cargo.lock');
+  process.exit(1);
+}
+
 const tauriArgs = ['run', 'tauri', '--', 'build'];
 
 if (isMacTarget) {
@@ -16,6 +25,12 @@ if (targetTriple) {
   // The explicit target drives cross-builds and release artifact naming so scripts do not accidentally use the host architecture.
   tauriArgs.push('--target', targetTriple);
 }
+
+// Tauri 将 `--` 后的参数传给 Cargo runner。`--locked` 可阻止发布构建改写 Cargo.lock；
+// 如果 Cargo.toml 与锁文件不一致，构建会明确失败，维护者应主动更新并提交锁文件。
+// Tauri forwards arguments after `--` to the Cargo runner. `--locked` prevents release
+// builds from rewriting Cargo.lock and fails clearly when the manifest and lock file disagree.
+tauriArgs.push('--', '--locked');
 
 const result = spawnSync('npm', tauriArgs, {
   stdio: 'inherit',

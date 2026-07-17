@@ -24,8 +24,7 @@
         "maximizable": true,
         "closable": true,
         "visible": false,
-        "shadow": false,
-        "center": true
+        "shadow": false
       }
     ],
     "security": {

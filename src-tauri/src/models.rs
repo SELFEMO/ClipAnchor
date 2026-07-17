@@ -77,10 +77,6 @@ pub struct AppSettings {
     pub auto_hide_actions: bool,
     pub auto_destroy_seconds: u64,
     pub animation_mode: String,
-    // 中文：记录主窗口最后一次正常位置，是为了让再次打开时保持用户的桌面工作习惯；无有效记录时由窗口控制模块居中。
-    // English: Store the last normal main-window position so reopening respects the user's desktop workflow; the window controller centers it when no valid position exists.
-    pub main_window_x: Option<i32>,
-    pub main_window_y: Option<i32>,
     pub popup_x: f64,
     pub popup_y: f64,
     pub popup_width: f64,
@@ -113,10 +109,8 @@ impl Default for AppSettings {
             ui_scale_percent: 100,
             light_mode_minutes: 5,
             auto_hide_actions: true,
-            auto_destroy_seconds: 3,
+            auto_destroy_seconds: 10,
             animation_mode: "performance".into(),
-            main_window_x: None,
-            main_window_y: None,
             popup_x: 24.0,
             popup_y: 24.0,
             popup_width: 340.0,
@@ -193,51 +187,19 @@ impl Default for UpdateStatusPayload {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
-pub struct LanguageMessageStatus {
-    // 中文：英文源文案与当前译文都保存轻量指纹，是为了精确区分“源文案更新”和“用户手动修改译文”，从而只调用必要的翻译请求。
-    // English: Lightweight fingerprints for both the English source and current translation distinguish source-copy updates from manual translation edits, so only necessary translation requests are made.
-    pub source_hash: String,
-    pub translation_hash: String,
-    pub modified: bool,
-}
-
-impl Default for LanguageMessageStatus {
-    fn default() -> Self {
-        Self {
-            source_hash: String::new(),
-            translation_hash: String::new(),
-            modified: false,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(default)]
 pub struct LanguagePackPayload {
     pub code: String,
     pub label: String,
     pub native_name: String,
     pub source: String,
     pub generated_at: String,
-    // 中文：格式标识和源语言只描述文件语义，不使用递增结构版本，避免语言包与应用发布号产生无意义耦合。
-    // English: The format marker and source locale describe file semantics without an incrementing schema version, avoiding needless coupling to application releases.
-    pub format: String,
-    pub source_locale: String,
     pub messages: HashMap<String, String>,
-    // 中文：状态表与 messages 平行保存，不改变现有译文结构，便于直接复制旧语言文件并进行增量升级。
-    // English: Keep status metadata parallel to messages without changing the existing translation structure, allowing copied legacy files to be upgraded incrementally.
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub message_status: HashMap<String, LanguageMessageStatus>,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub file_name: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub integrity: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub missing_keys: Vec<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub outdated_keys: Vec<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub removed_keys: Vec<String>,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub integrity_error: String,
 }
@@ -250,20 +212,14 @@ impl Default for LanguagePackPayload {
             native_name: String::new(),
             source: String::new(),
             generated_at: String::new(),
-            format: String::new(),
-            source_locale: "en".into(),
             messages: HashMap::new(),
-            message_status: HashMap::new(),
             file_name: String::new(),
             integrity: String::new(),
             missing_keys: Vec::new(),
-            outdated_keys: Vec::new(),
-            removed_keys: Vec::new(),
             integrity_error: String::new(),
         }
     }
 }
-
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BootstrapPayload {

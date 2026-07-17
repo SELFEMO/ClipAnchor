@@ -1,4 +1,4 @@
-use crate::{app_log, autostart, clipboard_service, database, models::{AppSettings, AppState, BootstrapPayload, ClipItem, ClipKind, HistoryRecord, LanguageMessageStatus, LanguagePackPayload, PathPayload, UpdateStatusPayload}, popup, settings, update_service};
+use crate::{app_log, autostart, clipboard_service, database, models::{AppSettings, AppState, BootstrapPayload, ClipItem, ClipKind, HistoryRecord, LanguagePackPayload, PathPayload, UpdateStatusPayload}, popup, settings, update_service};
 use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
 use std::{collections::HashMap, fs, io::{Read, Write}, path::Path, process::Command, thread, time::Duration};
@@ -54,9 +54,6 @@ pub fn close_main_window(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn quit_app(app: AppHandle) -> Result<(), String> {
-    // 退出前保存主窗口正常位置，是为了让下次启动回到用户最后整理好的工作区，而不是随机落在桌面。
-    // Saving the normal main-window position before exit lets the next launch return to the user's arranged workspace instead of landing randomly.
-    let _ = crate::window_control::save_main_window_position(&app);
     // 退出程序交给 Tauri 正常清理 WebView2 窗口，是为了避免强制 process::exit 触发 Chrome_WidgetWin_0 注销警告。
     // Quitting through Tauri lets WebView2 windows clean up normally, avoiding the Chrome_WidgetWin_0 unregister warning caused by forced process::exit.
     app.exit(0);
@@ -145,19 +142,8 @@ fn language_pack_dir(state: &AppState) -> std::path::PathBuf {
     state.paths.data.join("locales")
 }
 
-fn language_source_hash(value: &str) -> String {
-    // 稳定的轻量指纹只用于判断内置英文文案是否变化，避免未变化条目重复调用翻译接口。
-    // A stable lightweight fingerprint detects changes in built-in English copy, avoiding repeated API calls for unchanged entries.
-    let mut hash: u32 = 0x811c9dc5;
-    for byte in value.as_bytes() {
-        hash ^= u32::from(*byte);
-        hash = hash.wrapping_mul(0x01000193);
-    }
-    format!("{hash:08x}")
-}
-
 #[tauri::command]
-pub fn list_language_packs(reference_messages: HashMap<String, String>, state: State<'_, AppState>) -> Result<Vec<LanguagePackPayload>, String> {
+pub fn list_language_packs(required_keys: Vec<String>, state: State<'_, AppState>) -> Result<Vec<LanguagePackPayload>, String> {
     let directory = language_pack_dir(&state);
     app_log::info(&state.paths, "i18n", format!("checking language pack directory {}", directory.to_string_lossy()));
     if !directory.exists() {
@@ -178,8 +164,16 @@ pub fn list_language_packs(reference_messages: HashMap<String, String>, state: S
             continue;
         }
 
-        let file_name = path.file_name().and_then(|value| value.to_str()).unwrap_or_default().to_string();
-        let file_code = normalize_language_code(path.file_stem().and_then(|value| value.to_str()).unwrap_or_default());
+        let file_name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_string();
+        let file_code = normalize_language_code(
+            path.file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default(),
+        );
         if file_code.is_empty() || is_core_language_code(&file_code) {
             continue;
         }
@@ -187,12 +181,13 @@ pub fn list_language_packs(reference_messages: HashMap<String, String>, state: S
         let text = match fs::read_to_string(&path) {
             Ok(value) => value,
             Err(error) => {
-                // 中文：无法读取的手动语言文件仍显示在设置页，是为了让用户看到错误标记并直接修复。
-                // English: Unreadable manual language files remain visible in Settings so users can see an error marker and repair them.
+                // 无法读取的手动语言文件仍要显示在设置页，是为了让用户能看到警告并直接重新生成，而不是让问题文件静默消失。
+                // Unreadable manually supplied language files remain visible in Settings so users can see a warning and regenerate them instead of having the broken file silently disappear.
                 packs.push(damaged_language_pack(&file_code, &file_name, error.to_string()));
                 continue;
             }
         };
+
         let mut pack = match serde_json::from_str::<LanguagePackPayload>(&text) {
             Ok(value) => value,
             Err(error) => {
@@ -200,131 +195,39 @@ pub fn list_language_packs(reference_messages: HashMap<String, String>, state: S
                 continue;
             }
         };
-
-        // 中文：文件名作为稳定语言代号，是为了让刷新、更新和删除始终操作同一个本地文件。
-        // English: The filename is used as the stable language code so refresh, update, and delete always target the same local file.
+        // 文件名是本地语言包的稳定标识，使用它作为代号可确保刷新和删除始终操作同一个手动放入的文件。
+        // The filename is the stable identity of a local language pack, so using it as the code keeps regenerate and delete actions bound to the same manually supplied file.
         pack.code = file_code.clone();
+        if pack.code.is_empty() || is_core_language_code(&pack.code) {
+            continue;
+        }
         if pack.label.trim().is_empty() {
             pack.label = pack.code.to_uppercase();
         }
         if pack.native_name.trim().is_empty() {
             pack.native_name = pack.label.clone();
         }
-
-        let mut metadata_changed = false;
-        if pack.format != "clipanchor-language-pack" {
-            pack.format = "clipanchor-language-pack".into();
-            metadata_changed = true;
-        }
-        if pack.source_locale.trim().is_empty() {
-            pack.source_locale = "en".into();
-            metadata_changed = true;
-        }
-        if pack.file_name != file_name {
-            pack.file_name = file_name;
-            metadata_changed = true;
-        }
-
+        pack.file_name = file_name;
         pack.integrity_error.clear();
-        pack.missing_keys.clear();
-        pack.outdated_keys.clear();
-        pack.removed_keys.clear();
-
-        for (key, source_text) in &reference_messages {
-            let current_source_hash = language_source_hash(source_text);
-            let Some(translated_text) = pack.messages.get(key) else {
-                pack.missing_keys.push(key.clone());
-                continue;
-            };
-            let current_translation_hash = language_source_hash(translated_text);
-
-            match pack.message_status.get_mut(key) {
-                Some(status) => {
-                    // 中文：译文指纹变化说明用户或外部工具手动改过该项；保留此标记可避免增量更新覆盖人工修订。
-                    // English: A changed translation fingerprint means the entry was edited manually or by an external tool; preserving this marker prevents incremental updates from overwriting human revisions.
-                    if !status.translation_hash.is_empty() && status.translation_hash != current_translation_hash && !status.modified {
-                        status.modified = true;
-                        metadata_changed = true;
-                    }
-                    if status.translation_hash.is_empty() {
-                        status.translation_hash = current_translation_hash.clone();
-                        metadata_changed = true;
-                    }
-                    if status.source_hash.is_empty() {
-                        // 中文：旧格式文件没有源文案指纹时，以当前英文建立基线而不整包重译，是为了避免升级后突然消耗大量 API 次数。
-                        // English: Legacy files without source fingerprints establish the current English copy as a baseline without retranslating the whole pack, avoiding an unexpected API spike after upgrade.
-                        status.source_hash = current_source_hash.clone();
-                        metadata_changed = true;
-                    } else if status.source_hash != current_source_hash {
-                        pack.outdated_keys.push(key.clone());
-                    }
-                }
-                None => {
-                    // 中文：为旧语言文件逐项补充状态，而不修改译文正文，使用户直接复制的 JSON 也能从此获得增量更新能力。
-                    // English: Add per-entry status to legacy language files without changing translated copy, so directly copied JSON files gain incremental update support.
-                    pack.message_status.insert(
-                        key.clone(),
-                        LanguageMessageStatus {
-                            source_hash: current_source_hash,
-                            translation_hash: current_translation_hash,
-                            modified: false,
-                        },
-                    );
-                    metadata_changed = true;
-                }
-            }
-        }
-
-        let obsolete_status_keys = pack
-            .message_status
-            .keys()
+        pack.missing_keys = required_keys
+            .iter()
             .filter(|key| !pack.messages.contains_key(*key))
             .cloned()
-            .collect::<Vec<_>>();
-        for key in obsolete_status_keys {
-            pack.message_status.remove(&key);
-            metadata_changed = true;
-        }
-
-        pack.removed_keys = pack
-            .messages
-            .keys()
-            .filter(|key| !reference_messages.contains_key(*key))
-            .cloned()
             .collect();
-        pack.missing_keys.sort();
-        pack.outdated_keys.sort();
-        pack.removed_keys.sort();
-        pack.integrity = if pack.messages.is_empty() {
-            "incomplete".into()
-        } else if !pack.missing_keys.is_empty() || !pack.outdated_keys.is_empty() || !pack.removed_keys.is_empty() {
-            "update_available".into()
+        if pack.messages.is_empty() || !pack.missing_keys.is_empty() {
+            pack.integrity = "incomplete".into();
         } else {
-            "complete".into()
-        };
-
-        if metadata_changed {
-            // 中文：扫描只补充兼容元数据而不改写翻译正文，是为了让手动语言文件可升级、可校验且不丢失用户内容。
-            // English: Scanning adds compatibility metadata without rewriting translated copy, making manual packs upgradeable and verifiable without losing user content.
-            match serde_json::to_string_pretty(&pack) {
-                Ok(serialized) => {
-                    if let Err(error) = fs::write(&path, serialized) {
-                        app_log::warn(&state.paths, "i18n", format!("failed to persist language status metadata for {}: {}", pack.code, error));
-                    }
-                }
-                Err(error) => app_log::warn(&state.paths, "i18n", format!("failed to serialize language status metadata for {}: {}", pack.code, error)),
-            }
+            pack.integrity = "complete".into();
         }
         packs.push(pack);
     }
 
     packs.sort_by(|left, right| left.label.to_lowercase().cmp(&right.label.to_lowercase()));
-    let update_count = packs.iter().filter(|pack| pack.integrity == "update_available").count();
-    let error_count = packs.iter().filter(|pack| matches!(pack.integrity.as_str(), "corrupt" | "incomplete")).count();
+    let warning_count = packs.iter().filter(|pack| pack.integrity != "complete").count();
     app_log::info(
         &state.paths,
         "i18n",
-        format!("checked language packs: {} pack(s), {} update(s), {} error(s)", packs.len(), update_count, error_count),
+        format!("checked language packs: {} pack(s), {} warning(s)", packs.len(), warning_count),
     );
     Ok(packs)
 }
@@ -335,8 +238,6 @@ fn damaged_language_pack(code: &str, file_name: &str, error: String) -> Language
         label: code.to_uppercase(),
         native_name: code.to_uppercase(),
         source: "local-file".into(),
-        format: "clipanchor-language-pack".into(),
-        source_locale: "en".into(),
         file_name: file_name.to_string(),
         integrity: "corrupt".into(),
         integrity_error: error.chars().take(180).collect(),
@@ -365,31 +266,16 @@ pub fn save_language_pack(mut pack: LanguagePackPayload, state: State<'_, AppSta
     if pack.source.trim().is_empty() {
         pack.source = "generated".into();
     }
-    pack.format = "clipanchor-language-pack".into();
-    pack.source_locale = "en".into();
     pack.file_name = format!("{}.json", pack.code);
-
-    // 中文：保存时同步译文指纹并删除孤立状态项，是为了让下一次扫描能识别手动修改，同时避免被删文本的元数据长期堆积。
-    // English: Saving synchronizes translation fingerprints and removes orphaned status entries so the next scan detects manual edits without accumulating metadata for deleted copy.
-    let message_keys = pack.messages.keys().cloned().collect::<std::collections::HashSet<_>>();
-    pack.message_status.retain(|key, _| message_keys.contains(key));
-    for (key, value) in &pack.messages {
-        let current_translation_hash = language_source_hash(value);
-        let status = pack.message_status.entry(key.clone()).or_default();
-        status.translation_hash = current_translation_hash;
-    }
-
     pack.integrity = "complete".into();
     pack.missing_keys.clear();
-    pack.outdated_keys.clear();
-    pack.removed_keys.clear();
     pack.integrity_error.clear();
     let directory = language_pack_dir(&state);
     fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
     let output = directory.join(&pack.file_name);
     let text = serde_json::to_string_pretty(&pack).map_err(|error| error.to_string())?;
-    // 中文：生成语言包写入 data/locales，是为了让用户可备份、可编辑，同时避免机器翻译混入内置语言源码。
-    // English: Generated packs are stored in data/locales so users can back them up or edit them without mixing machine translations into built-in sources.
+    // 生成语言包写入 data/locales，是为了让用户可备份、可编辑，同时避免把机器翻译结果混入内置语言源码。
+    // Generated language packs are stored in data/locales so users can back them up or edit them without mixing machine translations into built-in source files.
     fs::write(&output, text).map_err(|error| error.to_string())?;
     app_log::info(&state.paths, "i18n", format!("saved generated language pack {} with {} message(s)", pack.code, pack.messages.len()));
     Ok(pack)

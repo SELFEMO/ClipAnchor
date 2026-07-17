@@ -37,7 +37,6 @@ pub fn install_tray(app: &AppHandle) -> tauri::Result<()> {
             }
             "quit" => {
                 if let Some(state) = app.try_state::<crate::models::AppState>() { app_log::warn(&state.paths, "tray", "quit menu clicked"); }
-                let _ = crate::window_control::save_main_window_position(app);
                 app.exit(0);
             },
             _ => {}
