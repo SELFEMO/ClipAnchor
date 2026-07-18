@@ -135,6 +135,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_bootstrap,
             list_language_packs,
+            open_language_pack_folder,
+            read_clipboard_text_for_input,
             save_language_pack,
             delete_language_pack,
             log_language_pack_event,

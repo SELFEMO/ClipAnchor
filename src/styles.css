@@ -6928,118 +6928,694 @@ body:not(.clipanchor-popup-body) .codex-shell.app-shell.window-maximized .codex-
   line-height: 1.3 !important;
 }
 
-/* 设置页与剪贴板页共享完整内容宽度，是为了在全屏时利用可用空间并消除居中的网页式大留白。 */
-/* Settings and clipboard pages share the full content width so fullscreen layouts use available space and avoid centered webpage-like gutters. */
-.settings-scroll > .settings-grid,
-.settings-scroll > .refined-settings-grid,
-.settings-scroll > .compact-settings-grid {
-  width: 100% !important;
-  max-width: none !important;
-  margin-inline: 0 !important;
+
+/* v0.5.7: macOS API-key paste, language-folder access, and data-management spacing. */
+.translation-api-key-wrap {
+  grid-template-columns: auto minmax(190px, 1fr) auto !important;
 }
 
-/* 滚动条只在内容真实滚动后的短暂窗口内显示；悬停本身不再触发显示。 */
-/* Scrollbars appear only briefly after content actually scrolls; hovering alone no longer reveals them. */
-.scroll-area,
-.scroll-area:hover {
-  scrollbar-width: thin !important;
-  scrollbar-color: transparent transparent !important;
-}
-.scroll-area::-webkit-scrollbar-thumb,
-.scroll-area:hover::-webkit-scrollbar-thumb {
-  background: transparent !important;
-}
-.scroll-area.is-scrolling {
-  scrollbar-color: var(--scroll-thumb) transparent !important;
-}
-.scroll-area.is-scrolling::-webkit-scrollbar-thumb {
-  background: var(--scroll-thumb) !important;
-}
-.clipanchor-popup-body .popup-file-list {
-  overflow-y: auto !important;
-  scrollbar-color: transparent transparent !important;
-}
-.clipanchor-popup-body .popup-file-list:hover::-webkit-scrollbar-thumb {
-  background: transparent !important;
-}
-.clipanchor-popup-body .popup-file-list.is-scrolling {
-  scrollbar-color: color-mix(in srgb, var(--blue) 45%, transparent) transparent !important;
-}
-.clipanchor-popup-body .popup-file-list.is-scrolling::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--blue) 45%, transparent) !important;
+.translation-api-key-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
-/* 更新提醒与损坏提醒使用不同的颜色和图形，是为了让用户一眼区分“可继续使用并增量更新”和“无法安全切换”。 */
-/* Update and damage states use distinct colors and symbols so users can immediately distinguish “usable with incremental update” from “unsafe to switch.” */
-.language-pack-option.has-update {
-  border-color: color-mix(in srgb, var(--accent) 44%, var(--line)) !important;
-}
-.language-pack-option.has-error {
-  border-color: color-mix(in srgb, var(--coral) 54%, var(--line)) !important;
-}
-.language-pack-update-icon {
-  color: var(--accent) !important;
-}
-.language-pack-error-icon {
-  color: var(--coral) !important;
-}
-.language-pack-option.has-update .language-pack-state {
-  color: color-mix(in srgb, var(--accent) 82%, var(--text-strong)) !important;
-}
-.language-pack-option.has-error .language-pack-state {
-  color: color-mix(in srgb, var(--coral) 82%, var(--text-strong)) !important;
-}
-.settings-dialog-icon.update {
-  color: var(--accent) !important;
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--line)) !important;
-  background: color-mix(in srgb, var(--accent) 12%, transparent) !important;
+.paste-api-key-button,
+.clear-api-key-button {
+  min-height: 38px !important;
+  min-width: 62px !important;
+  padding-inline: 10px !important;
+  white-space: nowrap;
 }
 
+.language-generator-folder-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin-top: 2px;
+}
 
-/* 设置页卡片直接占满主内容工作区，是为了在宽屏和全屏状态下保持与剪贴板、收藏夹一致的原生应用密度。 */
-/* Settings cards fill the main workspace so widescreen and fullscreen layouts keep the same native-app density as Clipboard and Favorites. */
-.settings-scroll {
-  padding-inline: 18px !important;
-}
-.settings-scroll > .settings-grid,
-.settings-scroll .settings-card.wide,
-.settings-scroll .appearance-controls,
-.settings-scroll .language-extension-panel {
-  min-width: 0 !important;
-  width: 100% !important;
-}
-.compact-settings-grid {
-  max-width: none !important;
+.language-generator-folder-row .language-generator-folder {
+  min-width: 0;
   margin: 0 !important;
 }
 
-/* 增量更新结果使用轻量内联状态，不再弹出网页式通知，是为了让生成流程的反馈留在当前原生设置卡片内。 */
-/* Incremental-update results use a lightweight inline status instead of webpage-like notices, keeping generation feedback inside the native settings card. */
-.language-generation-result {
-  margin: 8px 0 0 !important;
-  padding: 9px 11px !important;
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line)) !important;
-  border-radius: 11px !important;
-  color: color-mix(in srgb, var(--accent) 78%, var(--text-strong)) !important;
-  background: color-mix(in srgb, var(--accent) 7%, transparent) !important;
-  font-size: 12px !important;
-  line-height: 1.45 !important;
-}
-.language-generation-result.error {
-  border-color: color-mix(in srgb, var(--coral) 38%, var(--line)) !important;
-  color: color-mix(in srgb, var(--coral) 82%, var(--text-strong)) !important;
-  background: color-mix(in srgb, var(--coral) 8%, transparent) !important;
-}
-.language-progress.without-track {
-  padding-block: 9px !important;
+.open-language-folder-button {
+  min-height: 36px !important;
+  white-space: nowrap;
 }
 
-/* 扩展语言列表使用与主滚动区相同的“滚动时显示”规则，避免鼠标只是移入卡片就出现滚动条。 */
-/* The extra-language list follows the same scroll-only visibility rule as the main content, preventing a scrollbar from appearing merely on pointer entry. */
-.language-pack-grid.scroll-area,
-.language-pack-grid.scroll-area:hover {
-  scrollbar-color: transparent transparent !important;
+.database-path-field {
+  margin-top: 10px;
+  margin-bottom: 16px;
 }
-.language-pack-grid.scroll-area.is-scrolling {
-  scrollbar-color: var(--scroll-thumb) transparent !important;
+
+.full-data-card .old-history-cleanup {
+  margin-top: 0;
+}
+
+@media (max-width: 900px) {
+  .translation-api-key-wrap,
+  .language-generator-folder-row {
+    grid-template-columns: 1fr !important;
+  }
+
+  .translation-api-key-actions,
+  .open-language-folder-button {
+    width: 100%;
+  }
+
+  .translation-api-key-actions .soft-button {
+    flex: 1 1 0;
+  }
+}
+
+/* v0.5.7 follow-up: keep API-key actions inside their card and show the complete language-pack path. */
+.translation-api-key-wrap {
+  grid-template-columns: auto minmax(0, 1fr) !important;
+  grid-template-areas:
+    "api-key-label api-key-input"
+    ". api-key-actions" !important;
+  align-items: center !important;
+  column-gap: 10px !important;
+  row-gap: 8px !important;
+  overflow: hidden !important;
+}
+
+.translation-api-key-wrap > span:first-child {
+  grid-area: api-key-label;
+  align-self: center;
+}
+
+.translation-api-key-wrap > input {
+  grid-area: api-key-input;
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+.translation-api-key-actions {
+  grid-area: api-key-actions;
+  width: 100%;
+  min-width: 0;
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px !important;
+}
+
+.translation-api-key-actions .soft-button {
+  width: 100%;
+  min-width: 0 !important;
+  justify-content: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.language-generator-folder-row {
+  grid-template-columns: minmax(0, 1fr) !important;
+  align-items: stretch !important;
+  gap: 9px !important;
+}
+
+.language-generator-folder-row .language-generator-folder {
+  width: 100%;
+  max-width: none !important;
+  box-sizing: border-box;
+  margin: 0 !important;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg) 48%, transparent);
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+  line-height: 1.55 !important;
+  user-select: text;
+}
+
+.language-generator-folder-row .open-language-folder-button {
+  justify-self: end;
+  max-width: 100%;
+}
+
+@media (max-width: 900px) {
+  .translation-api-key-wrap {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-areas:
+      "api-key-label"
+      "api-key-input"
+      "api-key-actions" !important;
+  }
+
+  .translation-api-key-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .language-generator-folder-row .open-language-folder-button {
+    width: 100%;
+    justify-self: stretch;
+  }
+}
+
+@media (max-width: 560px) {
+  .translation-api-key-actions {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+
+
+/* v0.5.7 language compatibility/layout refinement:
+   balanced provider/API-key cards, selectable native paths, and usable older packs. */
+.translation-provider-actions {
+  grid-template-columns: minmax(240px, .82fr) minmax(430px, 1.35fr) !important;
+  align-items: stretch !important;
+  gap: 12px !important;
+}
+
+.translation-provider-select-wrap,
+.translation-api-key-wrap {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-template-rows: auto minmax(40px, auto) !important;
+  grid-template-areas: none !important;
+  align-content: start !important;
+  align-items: stretch !important;
+  gap: 8px !important;
+  min-height: 84px !important;
+  padding: 10px 12px !important;
+  overflow: visible !important;
+}
+
+.translation-provider-select-wrap > span,
+.translation-api-key-wrap > span:first-child {
+  min-width: 0 !important;
+  color: var(--muted) !important;
+  line-height: 1.2 !important;
+}
+
+.translation-provider-select-wrap .codex-dropdown,
+.translation-api-key-control-row {
+  align-self: end !important;
+}
+
+.translation-api-key-control-row {
+  display: grid !important;
+  grid-template-columns: minmax(120px, 1fr) max-content !important;
+  align-items: center !important;
+  gap: 8px !important;
+  min-width: 0 !important;
+}
+
+.translation-api-key-control-row > input {
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+.translation-api-key-actions {
+  display: grid !important;
+  grid-template-columns: repeat(2, max-content) !important;
+  gap: 6px !important;
+  width: auto !important;
+  min-width: 0 !important;
+}
+
+.translation-api-key-actions .soft-button {
+  width: auto !important;
+  min-width: 66px !important;
+  max-width: none !important;
+  padding-inline: 10px !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+}
+
+.language-folder-block {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  margin-top: 4px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 52%, transparent);
+}
+
+.language-folder-field {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 8px !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+}
+
+.language-folder-field .setting-name {
+  justify-self: start !important;
+}
+
+.language-folder-field input,
+.portable-path-input {
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 42px !important;
+  box-sizing: border-box !important;
+  direction: ltr !important;
+  text-align: left !important;
+  user-select: text !important;
+  cursor: text !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace !important;
+  font-size: 12px !important;
+}
+
+.language-folder-actions {
+  display: flex;
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.language-folder-actions .open-language-folder-button {
+  justify-self: auto !important;
+  width: auto !important;
+}
+
+.language-pack-option.has-update {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line)) !important;
+  background: color-mix(in srgb, var(--accent) 4%, var(--panel-solid)) !important;
+}
+
+.language-pack-option.has-update .language-pack-code svg {
+  color: color-mix(in srgb, var(--accent) 82%, var(--muted)) !important;
+}
+
+@media (max-width: 1120px) {
+  .translation-provider-actions {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+@media (max-width: 620px) {
+  .translation-api-key-control-row {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .translation-api-key-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    width: 100% !important;
+  }
+
+  .translation-api-key-actions .soft-button {
+    width: 100% !important;
+  }
+
+  .language-folder-actions .open-language-folder-button {
+    width: 100% !important;
+  }
+}
+
+
+/* v0.5.7 final language-service refinement:
+   compact API-key layout that remains stable for long translated labels. */
+.translation-service-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, .82fr) minmax(0, 1.45fr);
+  align-items: end;
+  gap: 12px;
+  min-width: 0;
+}
+
+.translation-service-field {
+  display: grid;
+  grid-template-rows: auto 42px;
+  align-content: end;
+  gap: 8px;
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 54%, transparent);
+  box-sizing: border-box;
+}
+
+.translation-service-label {
+  display: block;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.translation-provider-field .codex-dropdown,
+.translation-provider-field .codex-dropdown-button {
+  width: 100%;
+  min-width: 0;
+  height: 42px;
+}
+
+.translation-key-control {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.translation-key-control > input {
+  width: 100%;
+  min-width: 0;
+  height: 42px;
+  box-sizing: border-box;
+}
+
+.translation-key-control .soft-button {
+  width: auto !important;
+  min-width: max-content !important;
+  height: 42px !important;
+  padding-inline: 12px !important;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.language-pack-option.has-update .language-pack-select {
+  cursor: pointer;
+}
+
+.settings-dialog-copy p {
+  white-space: pre-line;
+}
+
+@media (max-width: 1080px) {
+  .translation-service-grid {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+}
+
+@media (max-width: 700px) {
+  .translation-key-control {
+    grid-template-columns: minmax(0, 1fr) repeat(2, minmax(96px, auto));
+  }
+}
+
+@media (max-width: 560px) {
+  .translation-key-control {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .translation-key-control .soft-button {
+    width: 100% !important;
+  }
+}
+
+
+.settings-dialog-card.wide {
+  width: min(560px, calc(100vw - 56px));
+}
+
+/* v0.5.7 incremental-language follow-up
+   Use one clean credential row instead of nested field cards. Unique class names avoid
+   legacy translation-service grid rules affecting long Japanese/Traditional Chinese labels. */
+.translation-api-settings {
+  display: block !important;
+  min-width: 0;
+}
+
+.translation-api-settings .translation-api-copy {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-bottom: 12px;
+}
+
+.translation-credentials-row {
+  display: grid;
+  grid-template-columns: minmax(210px, .72fr) minmax(420px, 1.45fr);
+  align-items: end;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+}
+
+.translation-credential-group {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 7px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.translation-credential-label {
+  display: block;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.3;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.translation-provider-group .codex-dropdown,
+.translation-provider-group .codex-dropdown-button,
+.translation-api-key-row > input,
+.translation-api-key-row > .soft-button {
+  height: 44px !important;
+  min-height: 44px !important;
+  box-sizing: border-box;
+}
+
+.translation-provider-group .codex-dropdown,
+.translation-provider-group .codex-dropdown-button {
+  width: 100%;
+  min-width: 0;
+}
+
+.translation-api-key-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.translation-api-key-row > input {
+  width: 100%;
+  min-width: 0;
+}
+
+.translation-api-key-row > .soft-button {
+  width: auto !important;
+  min-width: max-content !important;
+  padding-inline: 14px !important;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.language-pack-code.update-state {
+  color: color-mix(in srgb, #d88a16 88%, var(--text));
+  border-color: color-mix(in srgb, #d88a16 34%, var(--line));
+  background: color-mix(in srgb, #d88a16 8%, var(--surface));
+}
+
+.language-pack-code.error-state {
+  color: color-mix(in srgb, #ef6a73 90%, var(--text));
+  border-color: color-mix(in srgb, #ef6a73 38%, var(--line));
+  background: color-mix(in srgb, #ef6a73 8%, var(--surface));
+}
+
+.language-pack-code.update-state svg {
+  stroke-width: 2.2;
+}
+
+.language-pack-code.error-state svg {
+  stroke-width: 2.15;
+}
+
+.language-pack-option.has-update {
+  border-color: color-mix(in srgb, #d88a16 26%, var(--line));
+}
+
+.language-pack-option.has-warning {
+  border-color: color-mix(in srgb, #ef6a73 34%, var(--line));
+}
+
+@media (max-width: 1120px) {
+  .translation-credentials-row {
+    grid-template-columns: minmax(190px, .65fr) minmax(340px, 1.35fr);
+  }
+}
+
+@media (max-width: 900px) {
+  .translation-credentials-row {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+}
+
+@media (max-width: 620px) {
+  .translation-api-key-row {
+    grid-template-columns: minmax(0, 1fr) repeat(2, minmax(92px, auto));
+  }
+}
+
+@media (max-width: 520px) {
+  .translation-api-key-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .translation-api-key-row > .soft-button {
+    width: 100% !important;
+  }
+}
+
+/* v0.5.7 language-service layout hard reset.
+   These unique selectors intentionally bypass all legacy provider/API-key grid rules. */
+.translation-service-panel-v057 {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--surface) 52%, transparent);
+  box-sizing: border-box;
+}
+
+.translation-service-panel-v057__heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 5px 16px;
+  min-width: 0;
+  margin-bottom: 12px;
+}
+
+.translation-service-panel-v057__heading > strong {
+  flex: 0 0 auto;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 760;
+  line-height: 1.35;
+}
+
+.translation-service-panel-v057__heading > small {
+  flex: 1 1 360px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.translation-service-panel-v057__controls {
+  display: grid;
+  grid-template-columns: minmax(230px, .72fr) minmax(0, 1.7fr);
+  align-items: end;
+  gap: 14px;
+  width: 100%;
+  min-width: 0;
+}
+
+.translation-service-panel-v057__field {
+  display: grid;
+  grid-template-rows: auto 44px;
+  align-content: end;
+  gap: 7px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-sizing: border-box;
+}
+
+.translation-service-panel-v057__label {
+  display: block;
+  width: auto;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 720;
+  line-height: 1.25;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.translation-service-panel-v057__provider .codex-dropdown,
+.translation-service-panel-v057__provider .codex-dropdown-button {
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 44px !important;
+  min-height: 44px !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+}
+
+.translation-service-panel-v057__key-row {
+  display: grid;
+  grid-template-columns: minmax(170px, 1fr) max-content max-content;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.translation-service-panel-v057__key-row > input,
+.translation-service-panel-v057__key-row > .soft-button {
+  height: 44px !important;
+  min-height: 44px !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+}
+
+.translation-service-panel-v057__key-row > input {
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+.translation-service-panel-v057__key-row > .soft-button {
+  width: auto !important;
+  min-width: max-content !important;
+  padding-inline: 14px !important;
+  justify-content: center !important;
+  white-space: nowrap !important;
+}
+
+@media (max-width: 900px) {
+  .translation-service-panel-v057__controls {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+}
+
+@media (max-width: 610px) {
+  .translation-service-panel-v057__key-row {
+    grid-template-columns: minmax(0, 1fr) repeat(2, minmax(92px, auto));
+  }
+}
+
+@media (max-width: 500px) {
+  .translation-service-panel-v057__key-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .translation-service-panel-v057__key-row > input {
+    grid-column: 1 / -1;
+  }
+
+  .translation-service-panel-v057__key-row > .soft-button {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
 }

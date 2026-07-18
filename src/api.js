@@ -53,7 +53,17 @@ export const api = {
   installDownloadedUpdate: () => invoke('install_downloaded_update'),
   dismissUpdatePrompt: () => invoke('dismiss_update_prompt'),
   getDataUsage: () => invoke('get_data_usage'),
-  listLanguagePacks: (referenceMessages = {}) => invoke('list_language_packs', { referenceMessages }),
+  listLanguagePacks: (referenceMessages = {}) => {
+    // Pass the full English dictionary whenever available. The backend uses each source string's
+    // lightweight hash to detect changed UI copy, while key-only arrays remain accepted for
+    // compatibility with older frontend builds.
+    const normalizedReference = Array.isArray(referenceMessages)
+      ? referenceMessages.filter((key) => typeof key === 'string')
+      : (referenceMessages && typeof referenceMessages === 'object' ? referenceMessages : {});
+    return invoke('list_language_packs', { requiredKeys: normalizedReference });
+  },
+  openLanguagePackFolder: () => invoke('open_language_pack_folder'),
+  readClipboardTextForInput: () => invoke('read_clipboard_text_for_input'),
   saveLanguagePack: (pack) => invoke('save_language_pack', { pack }),
   deleteLanguagePack: (code) => invoke('delete_language_pack', { code }),
   logLanguagePackEvent: (event, code = '', provider = '', success = null, detail = '') => invoke('log_language_pack_event', { event, code, provider, success, detail }),

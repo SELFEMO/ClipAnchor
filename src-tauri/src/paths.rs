@@ -8,6 +8,7 @@ pub struct DataPaths {
     pub settings: PathBuf,
     pub resources: PathBuf,
     pub exports: PathBuf,
+    pub locales: PathBuf,
     pub logs: PathBuf,
 }
 
@@ -22,6 +23,7 @@ pub fn resolve() -> Result<DataPaths, String> {
         settings: data.join("settings.json"),
         resources: data.join("resources"),
         exports: data.join("exports"),
+        locales: data.join("locales"),
         logs: data.join("logs"),
         data,
     })
@@ -112,13 +114,19 @@ fn migrate_macos_bundle_data(root: &Path, persistent_data: &Path) -> Result<(), 
     fs::create_dir_all(persistent_data).map_err(|error| error.to_string())?;
     let persistent_has_settings = persistent_data.join("settings.json").exists();
     let persistent_has_database = persistent_data.join("clipanchor.db").exists();
-    if persistent_has_settings || persistent_has_database {
-        return Ok(());
+    if !persistent_has_settings && !persistent_has_database {
+        // macOS 更新会整体替换 .app；首次启动新版时把旧包内 data 迁移到 Application Support，才能从根源上避免设置随应用覆盖而丢失。
+        // macOS updates replace the whole .app bundle; migrating legacy in-bundle data to Application Support on first launch prevents settings from being lost during replacement.
+        copy_dir_contents(&legacy_data, persistent_data)?;
+    } else {
+        // 已存在数据库时仍单独迁移新增语言包，避免用户放入旧 data/locales 的 JSON 因“主数据已迁移”而被跳过。
+        // Even when the database already exists, migrate newly added language packs so JSON files placed in legacy data/locales are not skipped after the main data migration.
+        let legacy_locales = legacy_data.join("locales");
+        if legacy_locales.exists() {
+            copy_dir_contents(&legacy_locales, &persistent_data.join("locales"))?;
+        }
     }
-
-    // macOS 更新会整体替换 .app；首次启动新版时把旧包内 data 迁移到 Application Support，才能从根源上避免设置随应用覆盖而丢失。
-    // macOS updates replace the whole .app bundle; migrating legacy in-bundle data to Application Support on first launch prevents settings from being lost during replacement.
-    copy_dir_contents(&legacy_data, persistent_data)
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -161,7 +169,7 @@ pub fn webview_storage_path(paths: &DataPaths) -> PathBuf {
 }
 
 pub fn ensure(paths: &DataPaths) -> Result<(), String> {
-    for path in [&paths.data, &paths.resources, &paths.exports, &paths.logs] {
+    for path in [&paths.data, &paths.resources, &paths.exports, &paths.locales, &paths.logs] {
         fs::create_dir_all(path).map_err(|error| error.to_string())?;
     }
     Ok(())

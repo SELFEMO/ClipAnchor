@@ -1,4 +1,5 @@
 const builtinModules = import.meta.glob('./locales/*.js', { eager: true });
+
 const coreLanguageCodes = new Set(['en', 'zh']);
 
 function canonicalizeLocalePart(part, index) {
@@ -17,8 +18,8 @@ function normalizeLanguageCode(value) {
     .split('-')
     .map((part, index) => canonicalizeLocalePart(part, index))
     .filter(Boolean);
-  // 语言包文件名和 API 目标语言都使用标准 BCP-47 大小写，是为了区分 zh-Hant/zh-TW 这类繁体中文与内置简体中文。
-  // Language pack filenames and API target locales use standard BCP-47 casing so zh-Hant/zh-TW stay distinct from the built-in Simplified Chinese locale.
+  // Language pack filenames and API targets use standard BCP-47 casing so
+  // zh-Hant/zh-TW remain distinct from the built-in Simplified Chinese locale.
   return parts.join('-');
 }
 
@@ -32,7 +33,7 @@ function normalizeLanguagePack(raw, path = '') {
   const code = normalizeLanguageCode(source.code || source.locale || languageCodeFromPath(path));
   const messages = source.messages || source.dictionary || {};
   if (!code || !messages || typeof messages !== 'object') return null;
-  const integrity = source.integrity || (Object.keys(messages).length ? 'complete' : 'incomplete');
+  const integrity = source.integrity || (Object.keys(messages).length ? 'complete' : 'corrupt');
   return {
     code,
     label: source.label || source.name || inferLanguageLabel(code),
@@ -47,6 +48,7 @@ function normalizeLanguagePack(raw, path = '') {
     messageStatus: source.messageStatus || source.message_status || {},
     outdatedKeys: source.outdatedKeys || source.outdated_keys || [],
     removedKeys: source.removedKeys || source.removed_keys || [],
+    modifiedKeys: source.modifiedKeys || source.modified_keys || [],
     format: source.format || '',
     sourceLocale: source.sourceLocale || source.source_locale || 'en',
     messages
@@ -91,7 +93,9 @@ export function listLanguageChoices(runtimePacks = []) {
   for (const pack of runtimePacks || []) {
     const normalized = normalizeLanguagePack(pack);
     if (!normalized || coreLanguageCodes.has(normalized.code)) continue;
-    merged.set(normalized.code, { ...normalized, messages: undefined });
+    // Runtime choices retain their message/status payload so the Settings refresh action can
+    // perform a true incremental update instead of translating the whole pack again.
+    merged.set(normalized.code, { ...normalized });
   }
   return Array.from(merged.values()).sort((a, b) => {
     const leftCore = coreLanguageCodes.has(a.code);
@@ -106,9 +110,9 @@ function buildCatalogMap(runtimePacks = []) {
   for (const pack of runtimePacks || []) {
     const normalized = normalizeLanguagePack(pack);
     if (!normalized || coreLanguageCodes.has(normalized.code)) continue;
-    if (['corrupt', 'incomplete'].includes(normalized.integrity) || !Object.keys(normalized.messages || {}).length) continue;
-    // 可增量更新的语言包仍可继续使用，缺失的新文本会走内置回退；只有损坏、不完整或完全无内容的文件才被排除。
-    // Packs with incremental updates available remain usable and fall back for newly missing text; only damaged, incomplete, or empty files are excluded.
+    // Older, partial packs remain usable. createTranslator already falls back to a
+    // same-family built-in catalog and then English for keys added by newer releases.
+    if (normalized.integrity === 'corrupt' || !Object.keys(normalized.messages || {}).length) continue;
     catalogs.set(normalized.code, normalized);
   }
   return catalogs;
@@ -135,24 +139,17 @@ export function getReferenceMessages(code = 'en') {
 export function createTranslator(locale, runtimePacks = []) {
   const catalogs = buildCatalogMap(runtimePacks);
   const lang = resolveLocale(locale, runtimePacks);
-  const localized = catalogs.get(lang)?.messages || catalogs.get('en')?.messages || {};
-  const baseCode = lang.split('-')[0];
-  const baseFallback = catalogs.get(baseCode)?.messages;
+  const catalog = catalogs.get(lang) || catalogs.get('en');
+  const localized = catalog?.messages || catalogs.get('en')?.messages || {};
   const fallback = catalogs.get('en')?.messages || localized;
+  const outdated = new Set(catalog?.outdatedKeys || []);
   return (key) => {
-    // 空字符串也是合法翻译，用于刻意隐藏冗余说明；不能用 || 回退，否则会把内部键名暴露给用户。
-    // An empty string is a valid translation for intentionally hidden notes; avoid || fallback so internal keys are never shown to users.
-    if (Object.prototype.hasOwnProperty.call(localized, key)) {
-      return localized[key];
-    }
-    if (baseFallback && Object.prototype.hasOwnProperty.call(baseFallback, key)) {
-      // 运行时语言包缺少新增文案时，先回退到同语族内置语言，是为了避免扩展中文包显示英文系统提示。
-      // When a runtime pack misses newly added text, fallback to the built-in language with the same base code before English so Chinese extension packs do not show English system notices.
-      return baseFallback[key];
-    }
-    if (Object.prototype.hasOwnProperty.call(fallback, key)) {
-      return fallback[key];
-    }
+    // Compatibility is evaluated per message key. Missing or source-outdated entries fall back
+    // to English, while every unaffected translation in an older pack remains active.
+    // Empty strings are valid translations used to intentionally hide redundant copy.
+    if (outdated.has(key) && Object.prototype.hasOwnProperty.call(fallback, key)) return fallback[key];
+    if (Object.prototype.hasOwnProperty.call(localized, key)) return localized[key];
+    if (Object.prototype.hasOwnProperty.call(fallback, key)) return fallback[key];
     return '';
   };
 }

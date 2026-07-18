@@ -1,4 +1,4 @@
-use crate::{app_log, autostart, clipboard_service, database, models::{AppSettings, AppState, BootstrapPayload, ClipItem, ClipKind, HistoryRecord, LanguagePackPayload, PathPayload, UpdateStatusPayload}, popup, settings, update_service};
+use crate::{app_log, autostart, clipboard_service, database, models::{AppSettings, AppState, BootstrapPayload, ClipItem, ClipKind, HistoryRecord, LanguageMessageStatus, LanguagePackPayload, PathPayload, UpdateStatusPayload}, popup, settings, update_service};
 use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
 use std::{collections::HashMap, fs, io::{Read, Write}, path::Path, process::Command, thread, time::Duration};
@@ -139,17 +139,63 @@ fn is_core_language_code(code: &str) -> bool {
 }
 
 fn language_pack_dir(state: &AppState) -> std::path::PathBuf {
-    state.paths.data.join("locales")
+    state.paths.locales.clone()
+}
+
+fn language_pack_reference_messages(value: serde_json::Value) -> HashMap<String, String> {
+    match value {
+        serde_json::Value::Object(messages) => messages
+            .into_iter()
+            .filter_map(|(key, value)| {
+                let key = key.trim().to_string();
+                if key.is_empty() {
+                    return None;
+                }
+                Some((key, value.as_str().unwrap_or_default().to_string()))
+            })
+            .collect(),
+        // Mixed-version frontends may still send only a key array. Those packs remain
+        // discoverable, but source-change detection needs the current English dictionary.
+        serde_json::Value::Array(values) => values
+            .into_iter()
+            .filter_map(|value| value.as_str().map(str::trim).filter(|key| !key.is_empty()).map(|key| (key.to_string(), String::new())))
+            .collect(),
+        _ => HashMap::new(),
+    }
+}
+
+fn language_text_hash(value: &str) -> String {
+    // FNV-1a is intentionally used as a lightweight change fingerprint. It matches the
+    // existing 0.5.6 language-pack metadata and is not intended as a security hash.
+    let mut hash: u32 = 0x811c9dc5;
+    for byte in value.as_bytes() {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(0x01000193);
+    }
+    format!("{hash:08x}")
+}
+
+fn language_pack_for_disk(pack: &LanguagePackPayload) -> LanguagePackPayload {
+    let mut disk = pack.clone();
+    // These fields describe the current runtime comparison and are recalculated on scan.
+    disk.file_name.clear();
+    disk.integrity.clear();
+    disk.missing_keys.clear();
+    disk.outdated_keys.clear();
+    disk.removed_keys.clear();
+    disk.modified_keys.clear();
+    disk.integrity_error.clear();
+    disk
 }
 
 #[tauri::command]
-pub fn list_language_packs(required_keys: Vec<String>, state: State<'_, AppState>) -> Result<Vec<LanguagePackPayload>, String> {
+pub fn list_language_packs(required_keys: serde_json::Value, state: State<'_, AppState>) -> Result<Vec<LanguagePackPayload>, String> {
+    let reference_messages = language_pack_reference_messages(required_keys);
+    let mut required_keys = reference_messages.keys().cloned().collect::<Vec<_>>();
+    required_keys.sort();
     let directory = language_pack_dir(&state);
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
     app_log::info(&state.paths, "i18n", format!("checking language pack directory {}", directory.to_string_lossy()));
-    if !directory.exists() {
-        app_log::info(&state.paths, "i18n", "checked language packs: directory missing, 0 pack(s)");
-        return Ok(Vec::new());
-    }
 
     let mut packs = Vec::new();
     for entry in fs::read_dir(&directory).map_err(|error| error.to_string())? {
@@ -181,8 +227,6 @@ pub fn list_language_packs(required_keys: Vec<String>, state: State<'_, AppState
         let text = match fs::read_to_string(&path) {
             Ok(value) => value,
             Err(error) => {
-                // 无法读取的手动语言文件仍要显示在设置页，是为了让用户能看到警告并直接重新生成，而不是让问题文件静默消失。
-                // Unreadable manually supplied language files remain visible in Settings so users can see a warning and regenerate them instead of having the broken file silently disappear.
                 packs.push(damaged_language_pack(&file_code, &file_name, error.to_string()));
                 continue;
             }
@@ -195,8 +239,6 @@ pub fn list_language_packs(required_keys: Vec<String>, state: State<'_, AppState
                 continue;
             }
         };
-        // 文件名是本地语言包的稳定标识，使用它作为代号可确保刷新和删除始终操作同一个手动放入的文件。
-        // The filename is the stable identity of a local language pack, so using it as the code keeps regenerate and delete actions bound to the same manually supplied file.
         pack.code = file_code.clone();
         if pack.code.is_empty() || is_core_language_code(&pack.code) {
             continue;
@@ -207,17 +249,97 @@ pub fn list_language_packs(required_keys: Vec<String>, state: State<'_, AppState
         if pack.native_name.trim().is_empty() {
             pack.native_name = pack.label.clone();
         }
+        if pack.format.trim().is_empty() {
+            pack.format = "clipanchor-language-pack".into();
+        }
+        if pack.source_locale.trim().is_empty() {
+            pack.source_locale = "en".into();
+        }
         pack.file_name = file_name;
         pack.integrity_error.clear();
-        pack.missing_keys = required_keys
-            .iter()
-            .filter(|key| !pack.messages.contains_key(*key))
-            .cloned()
-            .collect();
-        if pack.messages.is_empty() || !pack.missing_keys.is_empty() {
-            pack.integrity = "incomplete".into();
+        pack.missing_keys.clear();
+        pack.outdated_keys.clear();
+        pack.removed_keys.clear();
+        pack.modified_keys.clear();
+
+        let mut metadata_changed = false;
+        for key in &required_keys {
+            let Some(translation) = pack.messages.get(key) else {
+                pack.missing_keys.push(key.clone());
+                continue;
+            };
+
+            let current_translation_hash = language_text_hash(translation);
+            let current_source = reference_messages.get(key).cloned().unwrap_or_default();
+            let current_source_hash = if current_source.is_empty() { String::new() } else { language_text_hash(&current_source) };
+            let status = pack.message_status.entry(key.clone()).or_insert_with(|| {
+                metadata_changed = true;
+                LanguageMessageStatus {
+                    source_hash: current_source_hash.clone(),
+                    translation_hash: current_translation_hash.clone(),
+                    modified: false,
+                }
+            });
+
+            if status.translation_hash.is_empty() {
+                status.translation_hash = current_translation_hash.clone();
+                metadata_changed = true;
+            } else if status.translation_hash != current_translation_hash {
+                // A translation changed outside the generator. Record the new baseline and
+                // protect the human edit from automatic overwrite during incremental updates.
+                status.translation_hash = current_translation_hash.clone();
+                if !status.modified {
+                    status.modified = true;
+                }
+                metadata_changed = true;
+            }
+
+            if !current_source_hash.is_empty() {
+                if status.source_hash.is_empty() {
+                    // Metadata-free legacy packs are migrated without spending API calls.
+                    status.source_hash = current_source_hash.clone();
+                    metadata_changed = true;
+                } else if status.source_hash != current_source_hash {
+                    pack.outdated_keys.push(key.clone());
+                }
+            }
+
+            if status.modified {
+                pack.modified_keys.push(key.clone());
+            }
+        }
+
+        if !required_keys.is_empty() {
+            pack.removed_keys = pack
+                .messages
+                .keys()
+                .filter(|key| !reference_messages.contains_key(*key))
+                .cloned()
+                .collect();
+            pack.removed_keys.sort();
+        }
+        pack.missing_keys.sort();
+        pack.outdated_keys.sort();
+        pack.modified_keys.sort();
+
+        if pack.messages.is_empty() {
+            pack.integrity = "corrupt".into();
+            pack.integrity_error = "language pack does not contain any usable messages".into();
+        } else if !pack.missing_keys.is_empty() || !pack.outdated_keys.is_empty() || !pack.removed_keys.is_empty() {
+            pack.integrity = "update_available".into();
         } else {
             pack.integrity = "complete".into();
+        }
+
+        if metadata_changed {
+            let disk = language_pack_for_disk(&pack);
+            match serde_json::to_string_pretty(&disk) {
+                Ok(value) => match fs::write(&path, value) {
+                    Ok(()) => app_log::info(&state.paths, "i18n", format!("migrated language metadata for {}", pack.code)),
+                    Err(error) => app_log::warn(&state.paths, "i18n", format!("could not persist language metadata for {}: {}", pack.code, error)),
+                },
+                Err(error) => app_log::warn(&state.paths, "i18n", format!("could not serialize language metadata for {}: {}", pack.code, error)),
+            }
         }
         packs.push(pack);
     }
@@ -266,14 +388,32 @@ pub fn save_language_pack(mut pack: LanguagePackPayload, state: State<'_, AppSta
     if pack.source.trim().is_empty() {
         pack.source = "generated".into();
     }
+    if pack.format.trim().is_empty() {
+        pack.format = "clipanchor-language-pack".into();
+    }
+    if pack.source_locale.trim().is_empty() {
+        pack.source_locale = "en".into();
+    }
+    // Ensure every saved translation has a status record. Frontend incremental updates
+    // normally provide these values, while this fallback keeps direct/manual callers valid.
+    for (key, translation) in &pack.messages {
+        let status = pack.message_status.entry(key.clone()).or_default();
+        if status.translation_hash.is_empty() {
+            status.translation_hash = language_text_hash(translation);
+        }
+    }
     pack.file_name = format!("{}.json", pack.code);
     pack.integrity = "complete".into();
     pack.missing_keys.clear();
+    pack.outdated_keys.clear();
+    pack.removed_keys.clear();
+    pack.modified_keys.clear();
     pack.integrity_error.clear();
     let directory = language_pack_dir(&state);
     fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
     let output = directory.join(&pack.file_name);
-    let text = serde_json::to_string_pretty(&pack).map_err(|error| error.to_string())?;
+    let disk = language_pack_for_disk(&pack);
+    let text = serde_json::to_string_pretty(&disk).map_err(|error| error.to_string())?;
     // 生成语言包写入 data/locales，是为了让用户可备份、可编辑，同时避免把机器翻译结果混入内置语言源码。
     // Generated language packs are stored in data/locales so users can back them up or edit them without mixing machine translations into built-in source files.
     fs::write(&output, text).map_err(|error| error.to_string())?;
@@ -550,6 +690,7 @@ pub fn get_bootstrap(state: State<'_, AppState>) -> Result<BootstrapPayload, Str
             data: state.paths.data.to_string_lossy().to_string(),
             database: state.paths.database.to_string_lossy().to_string(),
             resources: state.paths.resources.to_string_lossy().to_string(),
+            locales: state.paths.locales.to_string_lossy().to_string(),
             logs: state.paths.logs.to_string_lossy().to_string(),
         },
         app_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -1397,6 +1538,23 @@ fn human_size(bytes: i64) -> String {
     format!("{:.1} {}", value, units[unit])
 }
 
+
+#[tauri::command]
+pub fn read_clipboard_text_for_input(state: State<'_, AppState>) -> Result<String, String> {
+    let mut clipboard = arboard::Clipboard::new().map_err(|error| error.to_string())?;
+    let text = clipboard.get_text().map_err(|error| error.to_string())?;
+    // API Key 读取只记录字符数量，不记录内容，既能诊断 macOS 粘贴问题，也不会把密钥写入日志。
+    // API-key reads log only character count, never content, so macOS paste issues remain diagnosable without leaking credentials.
+    app_log::info(&state.paths, "i18n", format!("clipboard text read for settings input: {} character(s)", text.chars().count()));
+    Ok(text)
+}
+
+#[tauri::command]
+pub fn open_language_pack_folder(state: State<'_, AppState>) -> Result<(), String> {
+    fs::create_dir_all(&state.paths.locales).map_err(|error| error.to_string())?;
+    app_log::info(&state.paths, "i18n", "open language pack folder requested from UI");
+    open_path_with_system(&state.paths.locales)
+}
 
 #[tauri::command]
 pub fn get_log_status(state: State<'_, AppState>) -> Result<app_log::LogStatusPayload, String> {

@@ -4,7 +4,6 @@ import { BadgeCheck, Clock3, Database, Download, FolderOpen, HelpCircle, Keyboar
 import { api } from '../api.js';
 import { detectSystemLanguageCode, getReferenceMessages, inferLanguageLabel, listLanguageChoices, normalizeLocaleCode } from '../i18n.js';
 import { captureShortcutValue, formatShortcutForDisplay, normalizeShortcutForStorage } from '../shortcutDisplay.js';
-import { useTransientScrollbar } from '../useTransientScrollbar.js';
 
 function Switch({ checked, onChange }) {
   return <button className={`switch ${checked ? 'on' : ''}`} onClick={() => onChange(!checked)}><span /></button>;
@@ -14,6 +13,11 @@ function captureShortcut(event, setter) {
   event.preventDefault();
   const shortcut = captureShortcutValue(event);
   if (shortcut) setter(shortcut);
+}
+
+function selectPortablePath(event) {
+  // Read-only path fields keep native text selection so Cmd/Ctrl+C works on macOS, Windows, and Linux.
+  event.currentTarget.select();
 }
 
 function Segmented({ value, options, onChange, className = '' }) {
@@ -317,7 +321,6 @@ function normalizeSettings(value) {
     translation_api_url: getTranslationProvider(provider).endpoint,
     translation_api_key: activeKey,
     translation_api_keys: storedKeys,
-    auto_destroy_seconds: Number(value?.auto_destroy_seconds ?? 3),
     log_retention_days: Number(value?.log_retention_days || 7),
     shortcuts: {
       ...defaultShortcuts,
@@ -343,8 +346,7 @@ function formatAutostartError(error, t) {
 
 function SettingsSoftDialog({ dialog, t, onClose }) {
   if (!dialog) return null;
-  const DialogIcon = dialog.icon === 'warning' ? TriangleAlert : (dialog.icon === 'update' ? RefreshCw : HelpCircle);
-  const iconClass = dialog.icon === 'warning' ? 'warning' : (dialog.icon === 'update' ? 'update' : '');
+  const DialogIcon = dialog.icon === 'warning' ? TriangleAlert : HelpCircle;
   async function runConfirm() {
     const action = dialog.onConfirm;
     onClose();
@@ -353,14 +355,12 @@ function SettingsSoftDialog({ dialog, t, onClose }) {
   async function runCancel() {
     const action = dialog.onCancel;
     onClose();
-    // “稍后处理”只在用户明确按下该按钮时执行后续动作，点击遮罩仍保持纯关闭，避免意外切换语言。
-    // “Handle later” runs its follow-up only from the explicit button; backdrop dismissal remains a plain close to avoid accidental locale switches.
     if (action) await action();
   }
   return (
     <div className="soft-modal-backdrop settings-dialog-backdrop" role="presentation" onClick={onClose}>
-      <section className={`soft-modal-card settings-dialog-card ${dialog.danger ? 'danger' : ''}`} role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
-        <span className={`settings-dialog-icon ${iconClass}`}><DialogIcon size={19} /></span>
+      <section className={`soft-modal-card settings-dialog-card ${dialog.danger ? 'danger' : ''} ${dialog.wide ? 'wide' : ''}`} role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+        <span className={`settings-dialog-icon ${dialog.icon === 'warning' ? 'warning' : ''}`}><DialogIcon size={19} /></span>
         <div className="settings-dialog-copy">
           <strong>{dialog.title}</strong>
           <p>{dialog.message}</p>
@@ -424,16 +424,23 @@ function isBuiltInLanguageCode(code) {
     || normalized.startsWith('zh-Hans-');
 }
 
-function languageSourceFingerprint(value) {
-  // 中文：前后端使用相同的 FNV-1a 指纹，是为了让语言文件可离线检查，并准确判断哪一条英文源文案发生了变化。
-  // English: Frontend and backend share the same FNV-1a fingerprint so language files can be inspected offline and each changed English source string is identified precisely.
+function languageTextHash(value) {
   let hash = 0x811c9dc5;
-  const bytes = new TextEncoder().encode(String(value || ''));
+  const bytes = new TextEncoder().encode(String(value ?? ''));
   for (const byte of bytes) {
     hash ^= byte;
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
   return hash.toString(16).padStart(8, '0');
+}
+
+function readMessageStatus(status, key) {
+  const value = status?.[key] || {};
+  return {
+    sourceHash: String(value.source_hash || value.sourceHash || ''),
+    translationHash: String(value.translation_hash || value.translationHash || ''),
+    modified: Boolean(value.modified)
+  };
 }
 
 export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCheckUpdate, languagePacks = [], onLanguagePacksChange = () => {} }) {
@@ -447,8 +454,6 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
   const [languageCodeDraft, setLanguageCodeDraft] = useState('');
   const [translationApiKeyDraft, setTranslationApiKeyDraft] = useState(() => String(settings.translation_api_key || ''));
   const [languageGenerationState, setLanguageGenerationState] = useState({ busy: false, message: '', error: false, current: 0, total: 0, percent: 0 });
-  const settingsScrollRef = useTransientScrollbar();
-  const languagePackGridRef = useTransientScrollbar();
 
   useEffect(() => {
     // 设置页存在本地编辑态；当快捷键从后端改变服务开关时，需要用最新 boot 设置覆盖本地态。
@@ -477,6 +482,37 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
   const extraLanguageOptions = useMemo(() => languageChoices.filter((item) => !['en', 'zh'].includes(item.code)), [languageChoices]);
   const activeTranslationProvider = getTranslationProvider(settings.translation_api_provider, settings.translation_api_url);
   const referenceLanguageMessages = useMemo(() => getReferenceMessages('en'), []);
+  const languagePackFolderPath = boot.paths.locales || `${boot.paths.data}/locales`;
+
+  useEffect(() => {
+    let disposed = false;
+    let refreshTimer = 0;
+
+    async function rescanLocalLanguagePacks() {
+      try {
+        const packs = await api.listLanguagePacks(referenceLanguageMessages);
+        if (!disposed) onLanguagePacksChange(Array.isArray(packs) ? packs : []);
+      } catch (error) {
+        // The normal settings scan writes detailed diagnostics; focus refresh stays silent.
+        console.error('ClipAnchor language-pack focus refresh failed:', error);
+      }
+    }
+
+    function scheduleRescan() {
+      window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(rescanLocalLanguagePacks, 120);
+    }
+
+    // Scan once when the settings page mounts, then rescan after the user returns from
+    // Finder/Explorer so manually copied JSON files appear without another app restart.
+    scheduleRescan();
+    window.addEventListener('focus', scheduleRescan);
+    return () => {
+      disposed = true;
+      window.clearTimeout(refreshTimer);
+      window.removeEventListener('focus', scheduleRescan);
+    };
+  }, [boot.paths.locales, referenceLanguageMessages, onLanguagePacksChange]);
 
   async function persist(next) {
     const normalized = normalizeSettings(next);
@@ -585,6 +621,30 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
     return saved;
   }
 
+  function applyPastedTranslationApiKey(value) {
+    const nextKey = String(value || '').replace(/[\r\n]+$/g, '').trim();
+    setTranslationApiKeyDraft(nextKey);
+    return nextKey;
+  }
+
+  async function pasteTranslationApiKey() {
+    if (languageGenerationState.busy || !activeTranslationProvider.supportsApiKey) return;
+    try {
+      const nextKey = applyPastedTranslationApiKey(await api.readClipboardTextForInput());
+      await saveTranslationApiKey(nextKey);
+    } catch (error) {
+      showSettingsAlert(t('translationApiSettingsTitle'), t('translationApiKeyPasteFailed').replace('{error}', String(error)));
+    }
+  }
+
+  async function openLanguagePackFolder() {
+    try {
+      await api.openLanguagePackFolder();
+    } catch (error) {
+      showSettingsAlert(t('languagePackOther'), String(error));
+    }
+  }
+
   const updateShortcuts = (key, value) => update({ shortcuts: { ...defaultShortcuts, ...(settings.shortcuts || {}), [key]: value } });
   const isMac = /Mac|iPhone|iPad|iPod/i.test(window.navigator?.platform || '');
 
@@ -677,9 +737,8 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
       return [];
     });
     const normalized = Array.isArray(packs) ? packs : [];
-    const updateCount = normalized.filter((pack) => pack.integrity === 'update_available').length;
-    const errorCount = normalized.filter((pack) => ['corrupt', 'incomplete'].includes(pack.integrity)).length;
-    await api.logLanguagePackEvent('scan_finished', '', 'local-pack-store', true, `${normalized.length} pack(s), ${updateCount} update(s), ${errorCount} error(s)`).catch(() => {});
+    const warningCount = normalized.filter((pack) => pack.integrity && pack.integrity !== 'complete').length;
+    await api.logLanguagePackEvent('scan_finished', '', 'local-pack-store', true, `${normalized.length} pack(s), ${warningCount} warning(s)`).catch(() => {});
     onLanguagePacksChange(normalized);
     return normalized;
   }
@@ -709,10 +768,7 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
     return restorePlaceholders(translated || safe, placeholders);
   }
 
-  async function runLanguagePackGeneration(
-    requestedCode,
-    { activateAfterSave = false, regenerated = false, existingPack = null } = {}
-  ) {
+  async function runLanguagePackGeneration(requestedCode, { activateAfterSave = false, regenerated = false, existingPack = null } = {}) {
     const rawCode = String(requestedCode || '').trim();
     const targetCode = normalizeLocaleCode(rawCode || detectSystemLanguageCode());
     if (!/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$/.test(targetCode)) {
@@ -732,143 +788,125 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
       await saveTranslationApiKey(activeApiKey);
     }
 
-    const currentPack = existingPack
-      || languagePacks.find((pack) => normalizeLocaleCode(pack?.code || '') === targetCode)
-      || null;
-    const label = currentPack?.native_name || currentPack?.nativeName || currentPack?.label || inferLanguageLabel(targetCode);
-    const reference = referenceLanguageMessages;
-    const entries = Object.entries(reference);
-    const previousMessages = currentPack?.messages && typeof currentPack.messages === 'object' ? currentPack.messages : {};
-    const previousStatus = currentPack?.message_status || currentPack?.messageStatus || {};
-    const backendOutdated = new Set(currentPack?.outdated_keys || currentPack?.outdatedKeys || []);
+    const reference = getReferenceMessages('en');
+    const previousMessages = existingPack?.messages && typeof existingPack.messages === 'object' ? existingPack.messages : {};
+    const previousStatus = existingPack?.messageStatus && typeof existingPack.messageStatus === 'object' ? existingPack.messageStatus : {};
     const translated = {};
-    const messageStatus = {};
-    const pendingEntries = [];
-    let reusedCount = 0;
+    const nextMessageStatus = {};
+    const translateEntries = [];
+    let reused = 0;
+    let manuallyProtected = 0;
 
-    for (const [key, sourceText] of entries) {
-      const hasPrevious = Object.prototype.hasOwnProperty.call(previousMessages, key);
-      const previousText = hasPrevious ? String(previousMessages[key] ?? '') : '';
-      const status = previousStatus[key] || {};
-      const sourceHash = languageSourceFingerprint(sourceText);
-      const translationHash = languageSourceFingerprint(previousText);
-      const storedTranslationHash = String(status.translation_hash || status.translationHash || '');
-      const manuallyEdited = Boolean(status.modified)
-        || Boolean(storedTranslationHash && storedTranslationHash !== translationHash);
-      const sourceChanged = Boolean(status.source_hash || status.sourceHash)
-        && String(status.source_hash || status.sourceHash) !== sourceHash;
-      const needsTranslation = !hasPrevious || ((sourceChanged || backendOutdated.has(key)) && !manuallyEdited);
-
-      if (needsTranslation) {
-        pendingEntries.push([key, sourceText]);
+    for (const [key, sourceText] of Object.entries(reference)) {
+      const sourceHash = languageTextHash(sourceText);
+      const hasTranslation = Object.prototype.hasOwnProperty.call(previousMessages, key);
+      if (!hasTranslation) {
+        translateEntries.push([key, sourceText, sourceHash]);
         continue;
       }
 
-      // 中文：未变化的译文直接复用，人工修改项也优先保留，是为了把 API 调用严格限制在新增或确实需要适配的界面文本上。
-      // English: Unchanged translations are reused and manually edited entries are preserved, limiting API calls strictly to new or genuinely outdated UI copy.
-      translated[key] = previousText;
-      messageStatus[key] = {
-        source_hash: sourceHash,
+      const translation = String(previousMessages[key] ?? '');
+      const translationHash = languageTextHash(translation);
+      const oldStatus = readMessageStatus(previousStatus, key);
+      const manuallyModified = oldStatus.modified || Boolean(oldStatus.translationHash && oldStatus.translationHash !== translationHash);
+      const sourceChanged = Boolean(oldStatus.sourceHash && oldStatus.sourceHash !== sourceHash);
+
+      if (sourceChanged && !manuallyModified) {
+        translateEntries.push([key, sourceText, sourceHash]);
+        continue;
+      }
+
+      translated[key] = translation;
+      nextMessageStatus[key] = {
+        // Keep the previous source hash for a protected manual translation when the English
+        // source changed. The scanner will continue to request human review without overwriting it.
+        source_hash: sourceChanged && manuallyModified ? oldStatus.sourceHash : sourceHash,
         translation_hash: translationHash,
-        modified: manuallyEdited
+        modified: manuallyModified
       };
-      reusedCount += 1;
+      reused += 1;
+      if (sourceChanged && manuallyModified) manuallyProtected += 1;
     }
 
-    const providerName = effectiveProvider.logName;
-    const total = pendingEntries.length;
+    const removed = Object.keys(previousMessages).filter((key) => !Object.prototype.hasOwnProperty.call(reference, key)).length;
+    const totalToTranslate = translateEntries.length;
+    const label = existingPack?.label || inferLanguageLabel(targetCode);
+    const nativeName = existingPack?.nativeName || existingPack?.native_name || label;
+
     setLanguageGenerationState({
       busy: true,
-      message: total
-        ? t('languageProgressLabel').replace('{current}', '0').replace('{total}', String(total))
-        : t('languageCleaningObsolete'),
+      message: totalToTranslate
+        ? t('languageProgressLabel').replace('{current}', '0').replace('{total}', String(totalToTranslate))
+        : t('languageNoUpdates').replace('{language}', label),
       error: false,
       current: 0,
-      total,
-      percent: total ? 0 : 100
+      total: totalToTranslate,
+      percent: totalToTranslate ? 0 : 100
     });
 
     try {
-      await api.logLanguagePackEvent(
-        regenerated ? 'regenerate_started' : 'generate_started',
-        targetCode,
-        providerName,
-        true,
-        `${total} translation request(s), ${reusedCount} reused`
-      ).catch(() => {});
+      const providerName = effectiveProvider.logName;
+      await api.logLanguagePackEvent(regenerated ? 'incremental_update_started' : 'generate_started', targetCode, providerName, true, `${totalToTranslate} translate, ${reused} reuse, ${removed} remove`).catch(() => {});
 
-      if (total) {
-        await api.logLanguagePackEvent('translation_api_started', mapTranslationTargetCode(targetCode, effectiveProvider.id), providerName, true, `source en, pack ${targetCode}`).catch(() => {});
-      }
-
-      let lastLoggedProgress = 0;
-      // 中文：只顺序翻译待更新项，是为了兼容免费接口限流，同时避免软件更新后重复请求整份语言包。
-      // English: Only pending entries are translated sequentially to respect free-service rate limits and avoid retranslating an entire pack after application updates.
-      for (let index = 0; index < pendingEntries.length; index += 1) {
-        const [key, value] = pendingEntries[index];
-        const translatedValue = await translateUiString(value, targetCode, effectiveProvider.id, activeApiKey);
-        translated[key] = translatedValue;
-        messageStatus[key] = {
-          source_hash: languageSourceFingerprint(value),
-          translation_hash: languageSourceFingerprint(translatedValue),
-          modified: false
-        };
-        const current = index + 1;
-        const percent = Math.round((current / total) * 100);
-        setLanguageGenerationState({
-          busy: true,
-          message: t('languageProgressLabel').replace('{current}', String(current)).replace('{total}', String(total)),
-          error: false,
-          current,
-          total,
-          percent
-        });
-        if (percent >= lastLoggedProgress + 25 || current === total) {
-          lastLoggedProgress = percent;
-          await api.logLanguagePackEvent('translation_progress', mapTranslationTargetCode(targetCode, effectiveProvider.id), providerName, true, `${percent}% (${current}/${total})`).catch(() => {});
+      if (totalToTranslate) {
+        await api.logLanguagePackEvent('translation_api_started', mapTranslationTargetCode(targetCode, effectiveProvider.id), providerName, true, `source en, pack ${targetCode}, ${totalToTranslate} item(s)`).catch(() => {});
+        let lastLoggedProgress = 0;
+        for (let index = 0; index < translateEntries.length; index += 1) {
+          const [key, value, sourceHash] = translateEntries[index];
+          const valueTranslated = await translateUiString(value, targetCode, effectiveProvider.id, activeApiKey);
+          translated[key] = valueTranslated;
+          nextMessageStatus[key] = {
+            source_hash: sourceHash,
+            translation_hash: languageTextHash(valueTranslated),
+            modified: false
+          };
+          const current = index + 1;
+          const percent = Math.round((current / totalToTranslate) * 100);
+          setLanguageGenerationState({
+            busy: true,
+            message: t('languageProgressLabel').replace('{current}', String(current)).replace('{total}', String(totalToTranslate)),
+            error: false,
+            current,
+            total: totalToTranslate,
+            percent
+          });
+          if (percent >= lastLoggedProgress + 25 || current === totalToTranslate) {
+            lastLoggedProgress = percent;
+            await api.logLanguagePackEvent('translation_progress', mapTranslationTargetCode(targetCode, effectiveProvider.id), providerName, true, `${percent}% (${current}/${totalToTranslate})`).catch(() => {});
+          }
         }
-      }
-
-      if (total) {
-        await api.logLanguagePackEvent('translation_api_finished', mapTranslationTargetCode(targetCode, effectiveProvider.id), providerName, true, `${total} message(s)`).catch(() => {});
+        await api.logLanguagePackEvent('translation_api_finished', mapTranslationTargetCode(targetCode, effectiveProvider.id), providerName, true, `${totalToTranslate} item(s)`).catch(() => {});
       }
 
       const saved = await api.saveLanguagePack({
         code: targetCode,
-        label: currentPack?.label || label,
-        native_name: currentPack?.native_name || currentPack?.nativeName || label,
-        source: `${providerName} (${mapTranslationTargetCode(targetCode, effectiveProvider.id)})`,
+        label,
+        native_name: nativeName,
+        source: existingPack?.source || `${providerName} (${mapTranslationTargetCode(targetCode, effectiveProvider.id)})`,
         generated_at: new Date().toISOString(),
-        format: 'clipanchor-language-pack',
-        source_locale: 'en',
+        format: existingPack?.format || 'clipanchor-language-pack',
+        source_locale: existingPack?.sourceLocale || existingPack?.source_locale || 'en',
         messages: translated,
-        message_status: messageStatus
+        message_status: nextMessageStatus
       });
       const packs = await refreshLanguagePacks();
       const nextLocale = saved?.code || targetCode;
-      if (activateAfterSave) {
-        await chooseLocale(nextLocale);
-      }
-      await api.logLanguagePackEvent(
-        regenerated ? 'regenerate_finished' : 'generate_finished',
-        nextLocale,
-        providerName,
-        true,
-        `${total} translated, ${reusedCount} reused`
-      ).catch(() => {});
+      if (activateAfterSave) await chooseLocale(nextLocale);
+
+      await api.logLanguagePackEvent(regenerated ? 'incremental_update_finished' : 'generate_finished', nextLocale, providerName, true, `${totalToTranslate} translated, ${reused} reused, ${removed} removed, ${manuallyProtected} manual-review`).catch(() => {});
       setLanguageCodeDraft('');
-      const finalMessage = total === 0
-        ? t('languageNoUpdates').replace('{language}', label)
-        : t(regenerated ? 'languageIncrementalUpdateDone' : 'languageGenerateDone')
-          .replace('{language}', label)
-          .replace('{translated}', String(total))
-          .replace('{reused}', String(reusedCount));
       setLanguageGenerationState({
         busy: false,
-        message: finalMessage,
+        message: regenerated
+          ? t(totalToTranslate || removed ? 'languageIncrementalUpdateDone' : 'languageNoUpdates')
+            .replace('{language}', label)
+            .replace('{translated}', String(totalToTranslate))
+            .replace('{reused}', String(reused))
+            .replace('{removed}', String(removed))
+          : t('languageGenerateDone').replace('{language}', label),
         error: false,
-        current: total,
-        total,
+        current: totalToTranslate,
+        total: totalToTranslate,
         percent: 100
       });
       onLanguagePacksChange(packs);
@@ -878,7 +916,7 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
       const userMessage = rawError === 'TRANSLATION_RATE_LIMITED'
         ? t('languageGenerateRateLimited')
         : t('languageGenerateFailed').replace('{error}', rawError);
-      await api.logLanguagePackEvent(regenerated ? 'regenerate_failed' : 'generate_failed', targetCode, effectiveProvider.logName, false, rawError === 'TRANSLATION_RATE_LIMITED' ? '429 rate-limited' : rawError).catch(() => {});
+      await api.logLanguagePackEvent(regenerated ? 'incremental_update_failed' : 'generate_failed', targetCode, effectiveProvider.logName, false, rawError === 'TRANSLATION_RATE_LIMITED' ? '429 rate-limited' : rawError).catch(() => {});
       setLanguageGenerationState({ busy: false, message: userMessage, error: true, current: 0, total: 0, percent: 0 });
       return false;
     }
@@ -891,58 +929,45 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
   async function regenerateLanguagePack(language) {
     const targetCode = normalizeLocaleCode(language?.code || '');
     if (!targetCode || languageGenerationState.busy) return;
-    const existingPack = languagePacks.find((pack) => normalizeLocaleCode(pack?.code || '') === targetCode) || language;
-    await runLanguagePackGeneration(targetCode, {
-      activateAfterSave: settings.locale === targetCode,
-      regenerated: true,
-      existingPack
-    });
+    await runLanguagePackGeneration(targetCode, { activateAfterSave: settings.locale === targetCode, regenerated: true, existingPack: language });
   }
 
   async function chooseExtraLanguage(language) {
     const integrity = language?.integrity || 'complete';
-    if (integrity === 'complete') {
-      await chooseLocale(language.code);
-      return;
-    }
-
     const label = language?.nativeName || language?.label || language?.code;
-    if (integrity === 'update_available') {
-      // 中文：可更新语言包仍允许立即使用，缺失文本由内置语言回退；随后提示增量更新，避免把普通更新误报成文件损坏。
-      // English: An updatable pack remains usable immediately with built-in fallback for missing text; an incremental-update prompt then keeps normal updates distinct from file corruption.
-      await chooseLocale(language.code);
-      const missing = language?.missingKeys?.length || 0;
-      const changed = language?.outdatedKeys?.length || 0;
-      const removed = language?.removedKeys?.length || 0;
-      const message = t('languageUpdateWarning')
-        .replace('{language}', label)
-        .replace('{missing}', String(missing))
-        .replace('{changed}', String(changed))
-        .replace('{removed}', String(removed));
+
+    if (integrity === 'corrupt') {
       showSettingsConfirm(
-        t('languageUpdateTitle'),
-        message,
+        t('languageIntegrityTitle'),
+        t('languageIntegrityCorrupt').replace('{language}', label),
         () => regenerateLanguagePack(language),
         false,
-        { confirmLabel: t('languageIncrementalUpdateAction'), cancelLabel: t('languageLaterAction'), icon: 'update' }
+        { confirmLabel: t('languageRegenerateAction'), cancelLabel: t('languageLaterAction'), icon: 'warning' }
       );
       return;
     }
 
-    const message = integrity === 'corrupt'
-      ? t('languageIntegrityCorrupt').replace('{language}', label)
-      : t('languageIntegrityIncomplete')
-        .replace('{language}', label)
-        .replace('{count}', String(language?.missingKeys?.length || 0));
-    showSettingsConfirm(
-      t('languageIntegrityTitle'),
-      message,
-      () => regenerateLanguagePack(language),
-      false,
-      { confirmLabel: t('languageRegenerateAction'), cancelLabel: t('languageLaterAction'), icon: 'warning' }
-    );
-  }
+    if (['incomplete', 'update_available'].includes(integrity)) {
+      // This confirmation is intentionally user-facing and concise. Detailed key names,
+      // source hashes, and incremental-update statistics remain internal diagnostics only.
+      const message = t('languageUpdatePrompt').replace('{language}', label);
+      showSettingsConfirm(
+        t('languageUpdatePromptTitle'),
+        message,
+        () => regenerateLanguagePack(language),
+        false,
+        {
+          confirmLabel: t('languageUpdateNowAction'),
+          cancelLabel: t('languageUseCurrentAction'),
+          onCancel: () => chooseLocale(language.code),
+          icon: 'warning'
+        }
+      );
+      return;
+    }
 
+    await chooseLocale(language.code);
+  }
 
   async function deleteLanguagePack(language) {
     const targetCode = normalizeLocaleCode(language?.code || '');
@@ -988,7 +1013,7 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
     .filter(Boolean);
 
   return (
-    <section ref={settingsScrollRef} className="settings-scroll scroll-area">
+    <section className="settings-scroll scroll-area">
       <div className="settings-grid refined-settings-grid compact-settings-grid">
         <div className="settings-card wide hero-card">
           <h2><Power size={18} /> {t('basic')}</h2>
@@ -1016,34 +1041,36 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
               </div>
               <p className="language-pack-warning">{t('languagePackUnofficialUserNotice')}</p>
               {extraLanguageOptions.length ? (
-                <div ref={languagePackGridRef} className="language-pack-grid scroll-area">
+                <div className="language-pack-grid">
                   {/* 扩展语言卡片把名称、代号和切换状态拆成独立层级，是为了避免操作按钮挤压主要信息。 */}
                   {/* Extra-language cards separate the name, code, and switch state so action buttons cannot compress the primary information. */}
                   {extraLanguageOptions.map((language) => {
                     const active = settings.locale === language.code;
                     const displayName = language.nativeName || language.label || language.code;
-                    const needsUpdate = language.integrity === 'update_available';
-                    const damaged = ['corrupt', 'incomplete'].includes(language.integrity);
+                    const integrity = language.integrity || 'complete';
+                    const unavailable = integrity === 'corrupt';
+                    const updateAvailable = ['incomplete', 'update_available'].includes(integrity);
                     return (
-                      <div key={language.code} className={`language-pack-option ${active ? 'active' : ''} ${needsUpdate ? 'has-update' : ''} ${damaged ? 'has-error' : ''}`}>
+                      <div key={language.code} className={`language-pack-option ${active ? 'active' : ''} ${unavailable ? 'has-warning' : ''} ${updateAvailable ? 'has-update' : ''}`}>
                         <button type="button" className="language-pack-select" aria-pressed={active} title={displayName} onClick={() => chooseExtraLanguage(language)}>
                           <span className="language-pack-check" aria-hidden="true" />
                           <span className="language-pack-main">
                             <span className="language-pack-title-row">
                               <strong>{displayName}</strong>
-                              <small className="language-pack-code">
+                              <small className={`language-pack-code ${unavailable ? 'error-state' : updateAvailable ? 'update-state' : ''}`}>
                                 {language.code}
-                                {needsUpdate ? <RefreshCw className="language-pack-update-icon" size={12} title={t('languagePackNeedsUpdate')} aria-label={t('languagePackNeedsUpdate')} /> : null}
-                                {damaged ? <TriangleAlert className="language-pack-error-icon" size={12} title={t('languagePackDamaged')} aria-label={t('languagePackDamaged')} /> : null}
+                                {unavailable ? (
+                                  <TriangleAlert size={12} title={t('languageIntegrityCorrupt').replace('{language}', displayName)} aria-label={t('languagePackErrorWarning')} />
+                                ) : updateAvailable ? (
+                                  <RefreshCw size={12} title={t('languageIntegrityWarning')} aria-label={t('languagePackUpdateWarning')} />
+                                ) : null}
                               </small>
                             </span>
-                            <span className="language-pack-state">{active
-                              ? (needsUpdate ? `${t('languagePackActive')} · ${t('languagePackNeedsUpdate')}` : t('languagePackActive'))
-                              : (damaged ? t('languagePackDamaged') : (needsUpdate ? t('languagePackNeedsUpdate') : t('languagePackClickToUse')))}</span>
+                            <span className="language-pack-state">{active ? t('languagePackActive') : t('languagePackClickToUse')}</span>
                           </span>
                         </button>
                         <span className="language-pack-actions">
-                          <button type="button" className="language-pack-refresh" disabled={languageGenerationState.busy} title={needsUpdate ? t('languageIncrementalUpdateAction') : t('languageRefreshAction')} aria-label={needsUpdate ? t('languageIncrementalUpdateAction') : t('languageRefreshAction')} onClick={() => regenerateLanguagePack(language)}>
+                          <button type="button" className="language-pack-refresh" disabled={languageGenerationState.busy} title={t('languageRefreshAction')} aria-label={t('languageRefreshAction')} onClick={() => regenerateLanguagePack(language)}>
                             <RefreshCw size={14} />
                           </button>
                           <button type="button" className="language-pack-delete" disabled={languageGenerationState.busy} title={t('languageDeleteAction')} aria-label={t('languageDeleteAction')} onClick={() => deleteLanguagePack(language)}>
@@ -1062,14 +1089,14 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
                   <strong>{t('languageGeneratorTitle')}</strong>
                   <p>{t('languageGeneratorHint')}</p>
                 </div>
-                <div className="translation-api-settings">
-                  <div className="translation-api-copy">
+                <section className="translation-service-panel-v057" aria-label={t('translationApiSettingsTitle')}>
+                  <div className="translation-service-panel-v057__heading">
                     <strong>{t('translationApiSettingsTitle')}</strong>
                     <small>{t('translationApiSettingsHint')}</small>
                   </div>
-                  <div className="translation-provider-actions">
-                    <label className="translation-provider-select-wrap">
-                      <span>{t('translationProviderField')}</span>
+                  <div className="translation-service-panel-v057__controls">
+                    <div className="translation-service-panel-v057__field translation-service-panel-v057__provider">
+                      <span className="translation-service-panel-v057__label">{t('translationProviderField')}</span>
                       <DropdownSelect
                         value={normalizeTranslationProvider(settings.translation_api_provider, settings.translation_api_url)}
                         disabled={languageGenerationState.busy}
@@ -1080,40 +1107,73 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
                           { value: 'uapis', label: t('translationProviderUapis') }
                         ]}
                       />
-                    </label>
-                    <label className="translation-api-key-wrap">
-                      <span>{t('translationApiKeyField')}</span>
-                      <input
-                        type="password"
-                        value={activeTranslationProvider.supportsApiKey ? translationApiKeyDraft : ''}
-                        disabled={languageGenerationState.busy || !activeTranslationProvider.supportsApiKey}
-                        placeholder={activeTranslationProvider.supportsApiKey ? t('translationApiKeyPlaceholder') : t('translationApiKeyUnavailable')}
-                        autoComplete="off"
-                        onChange={(event) => setTranslationApiKeyDraft(event.target.value)}
-                        onBlur={() => saveTranslationApiKey()}
-                        onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
-                      />
-                      <button className="soft-button clear-api-key-button" type="button" disabled={languageGenerationState.busy || !activeTranslationProvider.supportsApiKey || !translationApiKeyDraft} onClick={clearTranslationApiKey}>{t('translationApiKeyClear')}</button>
-                    </label>
+                    </div>
+                    <div className="translation-service-panel-v057__field translation-service-panel-v057__key">
+                      <span className="translation-service-panel-v057__label">{t('translationApiKeyField')}</span>
+                      <div className="translation-service-panel-v057__key-row">
+                        <input
+                          type="password"
+                          aria-label={t('translationApiKeyField')}
+                          value={activeTranslationProvider.supportsApiKey ? translationApiKeyDraft : ''}
+                          disabled={languageGenerationState.busy || !activeTranslationProvider.supportsApiKey}
+                          placeholder={activeTranslationProvider.supportsApiKey ? t('translationApiKeyPlaceholder') : t('translationApiKeyUnavailable')}
+                          autoComplete="off"
+                          spellCheck="false"
+                          onChange={(event) => setTranslationApiKeyDraft(event.target.value)}
+                          onPaste={(event) => {
+                            const pasted = event.clipboardData?.getData('text');
+                            if (typeof pasted !== 'string') return;
+                            event.preventDefault();
+                            applyPastedTranslationApiKey(pasted);
+                          }}
+                          onBlur={() => saveTranslationApiKey()}
+                          onKeyDown={(event) => {
+                            if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'v') {
+                              event.preventDefault();
+                              pasteTranslationApiKey();
+                              return;
+                            }
+                            if (event.key === 'Enter') event.currentTarget.blur();
+                          }}
+                        />
+                        <button className="soft-button paste-api-key-button" type="button" disabled={languageGenerationState.busy || !activeTranslationProvider.supportsApiKey} onClick={pasteTranslationApiKey}>{t('translationApiKeyPaste')}</button>
+                        <button className="soft-button clear-api-key-button" type="button" disabled={languageGenerationState.busy || !activeTranslationProvider.supportsApiKey || !translationApiKeyDraft} onClick={clearTranslationApiKey}>{t('translationApiKeyClear')}</button>
+                      </div>
+                    </div>
                   </div>
-                </div>
+                </section>
                 <div className="language-generator-actions">
                   <input value={languageCodeDraft} onChange={(event) => setLanguageCodeDraft(event.target.value)} placeholder={t('languageCodePlaceholder')} />
                   <button className="primary-button" type="button" disabled={languageGenerationState.busy} onClick={generateLanguagePack}>{languageGenerationState.busy ? t('generatingLanguage') : t('generateLanguage')}</button>
                   <button className="soft-button reset-api-button" type="button" disabled={languageGenerationState.busy} onClick={resetTranslationProvider}><RotateCcw size={13} />{t('translationApiReset')}</button>
                 </div>
-                {languageGenerationState.busy ? (
-                  <div className={`language-progress ${languageGenerationState.total ? '' : 'without-track'}`} role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={languageGenerationState.percent}>
+                {languageGenerationState.busy && languageGenerationState.total ? (
+                  <div className="language-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={languageGenerationState.percent}>
                     <div className="language-progress-meta">
                       <span>{languageGenerationState.message}</span>
-                      {languageGenerationState.total ? <b>{t('languageProgressPercent').replace('{percent}', String(languageGenerationState.percent))}</b> : null}
+                      <b>{t('languageProgressPercent').replace('{percent}', String(languageGenerationState.percent))}</b>
                     </div>
-                    {languageGenerationState.total ? <span className="language-progress-track"><i style={{ width: `${languageGenerationState.percent}%` }} /></span> : null}
+                    <span className="language-progress-track"><i style={{ width: `${languageGenerationState.percent}%` }} /></span>
                   </div>
-                ) : languageGenerationState.message ? (
-                  <p className={`language-generation-result ${languageGenerationState.error ? 'error' : 'success'}`}>{languageGenerationState.message}</p>
                 ) : null}
-                <p className="language-generator-folder">{t('languagePackFolderHint').replace('{path}', `${boot.paths.data}/locales`)}</p>
+                <div className="language-folder-block">
+                  <label className="vertical language-folder-field">
+                    <SettingName>{t('languagePackFolderLabel')}</SettingName>
+                    <input
+                      className="portable-path-input"
+                      readOnly
+                      dir="ltr"
+                      spellCheck="false"
+                      value={languagePackFolderPath}
+                      title={languagePackFolderPath}
+                      onFocus={selectPortablePath}
+                      onDoubleClick={selectPortablePath}
+                    />
+                  </label>
+                  <div className="language-folder-actions">
+                    <button className="soft-button open-language-folder-button" type="button" onClick={openLanguagePackFolder}><FolderOpen size={15} /> {t('openLanguagePackFolder')}</button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1170,7 +1230,7 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
             <div className="data-summary-strip"><span>{t('dataUsage')}</span><strong>{dataUsage?.display || '...'}</strong></div>
             <label className="scale-step-row history-limit-row"><SettingName help={t('helpHistoryLimit')}>{t('historyLimit')}</SettingName><Stepper value={historyLimit} min={0} max={10000} step={100} suffix={historyLimit === 0 ? ` ${t('unlimited')}` : ''} onChange={setHistoryLimit} onReset={() => setHistoryLimit(0)} resetLabel={t('resetScale')} /></label>
           </div>
-          <label className="vertical"><SettingName>{t('dbPath')}</SettingName><input readOnly value={boot.paths.database} /></label>
+          <label className="vertical database-path-field"><SettingName>{t('dbPath')}</SettingName><input className="portable-path-input" readOnly dir="ltr" spellCheck="false" value={boot.paths.database} title={boot.paths.database} onFocus={selectPortablePath} onDoubleClick={selectPortablePath} /></label>
           <div className="old-history-cleanup">
             <label className="cleanup-days-field"><SettingName help={t('helpDeleteBeforeDays')}>{t('deleteBeforeDays')}</SettingName><input type="number" min="1" step="1" value={cleanupDays} onChange={(event) => setCleanupDays(event.target.value)} /></label>
             <label className="setting-row cleanup-preserve-toggle"><SettingName>{t('preserveFavorites')}</SettingName><Switch checked={cleanupPreservePinned} onChange={setCleanupPreservePinned} /></label>
@@ -1204,7 +1264,7 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
             </div>
             <div className="log-control-grid">
               <label className="scale-step-row log-retention-row"><SettingName help={t('helpLogRetentionDays')}>{t('logRetentionDays')}</SettingName><Stepper value={logRetentionDays} min={1} max={90} step={1} suffix={` ${t('days')}`} onChange={updateLogRetentionDays} onReset={() => updateLogRetentionDays(7)} resetLabel={t('resetScale')} /></label>
-              <label className="vertical log-path-field"><SettingName>{t('logPath')}</SettingName><input readOnly value={logStatus?.directory || boot.paths.logs || ''} /></label>
+              <label className="vertical log-path-field"><SettingName>{t('logPath')}</SettingName><input className="portable-path-input" readOnly dir="ltr" spellCheck="false" value={logStatus?.directory || boot.paths.logs || ''} title={logStatus?.directory || boot.paths.logs || ''} onFocus={selectPortablePath} onDoubleClick={selectPortablePath} /></label>
             </div>
             <div className="log-file-strip">
               {(logStatus?.files || []).slice(0, 3).map((file) => (

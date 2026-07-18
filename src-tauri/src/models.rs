@@ -185,6 +185,14 @@ impl Default for UpdateStatusPayload {
 }
 
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LanguageMessageStatus {
+    pub source_hash: String,
+    pub translation_hash: String,
+    pub modified: bool,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LanguagePackPayload {
@@ -193,13 +201,22 @@ pub struct LanguagePackPayload {
     pub native_name: String,
     pub source: String,
     pub generated_at: String,
+    pub format: String,
+    pub source_locale: String,
     pub messages: HashMap<String, String>,
+    pub message_status: HashMap<String, LanguageMessageStatus>,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub file_name: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub integrity: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub missing_keys: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub outdated_keys: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub removed_keys: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub modified_keys: Vec<String>,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub integrity_error: String,
 }
@@ -212,10 +229,16 @@ impl Default for LanguagePackPayload {
             native_name: String::new(),
             source: String::new(),
             generated_at: String::new(),
+            format: "clipanchor-language-pack".into(),
+            source_locale: "en".into(),
             messages: HashMap::new(),
+            message_status: HashMap::new(),
             file_name: String::new(),
             integrity: String::new(),
             missing_keys: Vec::new(),
+            outdated_keys: Vec::new(),
+            removed_keys: Vec::new(),
+            modified_keys: Vec::new(),
             integrity_error: String::new(),
         }
     }
@@ -233,6 +256,7 @@ pub struct PathPayload {
     pub data: String,
     pub database: String,
     pub resources: String,
+    pub locales: String,
     pub logs: String,
 }
 
