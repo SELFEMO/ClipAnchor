@@ -35,7 +35,7 @@ Before public release or production use, review the code, test every target plat
 | Windows ARM64 | Pending | Needs real-device package and runtime verification. |
 | macOS ARM64 | Verified | Apple Silicon APP/DMG runtime smoke tests passed. |
 | macOS x64 | Pending | Needs Intel macOS package and runtime verification. |
-| Linux x64 | Pending | Needs DEB/RPM package and desktop-environment verification. |
+| Linux x64 | Verified | Ubuntu x64 compilation, desktop launch, tray, clipboard, history, Lite-mode autostart, and core settings have been verified. Global-shortcut and popup-position controls are intentionally hidden because Linux desktop and Wayland APIs cannot provide consistent behavior across environments. |
 | Linux ARM64 | Pending | Needs ARM64 Linux package and runtime verification. |
 
 This table is a compact release checklist. Re-test long-running background behavior, autostart Lite mode, installer handoff, and update delivery before publishing a new build.
@@ -46,12 +46,12 @@ This table is a compact release checklist. Re-test long-running background behav
 |---|---|
 | Pinned popups | Creates an independent desktop popup for each copy action, with Pin, Copy, Unpin, auto-destroy, drag, and smart stacking. |
 | Clipboard types | Supports text, images, files, and mixed clipboard content. |
-| Lite mode | Startup launch runs silently without showing the main window; the UI can be restored from the tray or a shortcut. |
+| Lite mode | Startup launch runs silently without showing the main window; the UI can be restored from the tray, or from a shortcut on supported platforms. |
 | Single instance | Relaunching ClipAnchor activates and foregrounds the existing main window instead of leaving another long-running process. |
 | History | Local SQLite history with search, type filters, text editing, single delete, batch delete, and pin-from-history. |
 | Favorites | Favorite items are shown separately and remain in normal history; normal cleanup keeps them by default. |
 | Privacy filter | Off, light, and smart modes; light mode uses local rules to detect common sensitive-content patterns. |
-| Shortcuts | Global actions for the pin service, history service, show/hide main window, Lite mode, and pause/resume monitoring. |
+| Shortcuts | Global actions for the pin service, history service, main window, Lite mode, and theme on Windows and macOS; the setting is hidden on Linux. |
 | Data tools | Import/export JSON or metadata-complete CSV history, clean records by age, show the database location, and manage rotated runtime logs. |
 | Appearance | Dark, light, and system themes, UI scale, popup scale, transient scrollbars, and animation controls. |
 | Localization | Built-in English and Simplified Chinese, plus local extension language packs with incremental updates. |
@@ -64,7 +64,7 @@ Published installers and portable archives are available on the [Releases](https
 1. Open the latest release.
 2. Download an asset that matches the operating system and CPU architecture.
 3. Install the package or extract the portable archive.
-4. Start ClipAnchor and configure shortcuts, privacy filtering, appearance, language, and cleanup behavior in Settings.
+4. Start ClipAnchor and configure privacy filtering, appearance, language, cleanup behavior, and shortcuts where supported.
 
 When no compatible package is available, build ClipAnchor from source. Back up important files under `data/` before upgrading or replacing a portable installation.
 
@@ -84,7 +84,7 @@ When no compatible package is available, build ClipAnchor from source. Back up i
 ```bash
 git clone https://github.com/SELFEMO/ClipAnchor.git
 cd ClipAnchor
-npm install --registry=https://registry.npmmirror.com
+npm install
 npm run desktop:dev
 ```
 
@@ -119,7 +119,19 @@ Target-specific build commands currently include:
 npm run desktop:build:windows-x64
 npm run desktop:build:macos-arm64
 npm run desktop:build:macos-x64
+npm run desktop:build:linux-x64
 ```
+
+On Ubuntu, install Tauri's native build dependencies before the first Linux x64 build:
+
+```bash
+sudo apt update
+sudo apt install -y build-essential curl wget file libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libwebkit2gtk-4.1-dev
+rustup target add x86_64-unknown-linux-gnu
+npm run desktop:build:linux-x64
+```
+
+#### macOS Apple Silicon builds
 
 For Apple Silicon on a macOS host, add the Rust target before the first ARM64 build:
 
@@ -128,9 +140,25 @@ rustup target add aarch64-apple-darwin
 npm run desktop:build:macos-arm64
 ```
 
+#### Build output and package formats
+
 Tauri writes installers to `src-tauri/target/release/bundle/` or `src-tauri/target/<target-triple>/release/bundle/` for target-specific builds. Project scripts then collect distributable artifacts into the root `release/` folder.
 
 Linux targets include DEB and RPM. Windows targets include NSIS and MSI. macOS targets include APP and DMG. Create macOS DMG files on macOS, then sign and notarize them with the maintainer's own Apple Developer credentials before public distribution.
+
+## Linux desktop notes
+
+### Popup-position limitation
+
+Linux currently does not expose the **Adjust popup position** setting. Under Wayland, the desktop compositor owns top-level window placement and applications cannot reliably force an absolute screen coordinate. ClipAnchor therefore hides this setting on Linux instead of presenting an option that may not work. Pinned popups remain always-on-top and can still be dragged manually.
+
+### Global-shortcut limitation
+
+Linux hides the global-shortcut setting. Wayland portal availability, desktop authorization, and GNOME shortcut behavior differ between distributions and sessions, so ClipAnchor avoids exposing a control that cannot be guaranteed to work reliably. Use the tray menu and main-window controls instead.
+
+### Launch at startup
+
+Linux autostart entries are written to `$XDG_CONFIG_HOME/autostart/clipanchor.desktop`, or `~/.config/autostart/clipanchor.desktop` when `XDG_CONFIG_HOME` is unset. ClipAnchor signs in directly in Lite mode.
 
 ## Basic usage
 
@@ -138,8 +166,8 @@ Linux targets include DEB and RPM. Windows targets include NSIS and MSI. macOS t
 2. Copy text, images, or files to create compact desktop popups.
 3. Select **Pin** to keep a popup above other windows and reveal actions such as **Copy** and **Unpin**.
 4. Search history on the Clipboard page, favorite important records, edit text entries, or pin an existing record again.
-5. Use Settings to adjust theme, language, scale, shortcuts, popup position, privacy filtering, auto-destroy delay, and cleanup behavior.
-6. After enabling launch at startup, ClipAnchor signs in silently in Lite mode. Double-click the tray icon, choose **Show ClipAnchor**, or press `Ctrl+Shift+X` to restore the main window.
+5. Use Settings to adjust theme, language, scale, privacy filtering, auto-destroy delay, cleanup behavior, and shortcuts on supported platforms. Linux hides shortcut and popup-position controls.
+6. After enabling launch at startup, ClipAnchor signs in silently in Lite mode. Double-click the tray icon or choose **Show ClipAnchor** to restore the main window; Windows and macOS can also use the configured shortcut.
 
 ## Extension language packs
 
@@ -219,7 +247,7 @@ Copy the completed JSON file to:
 data/locales/
 ```
 
-Fully quit ClipAnchor, including the tray process, and restart it. The language will then appear in the extension-language list in Settings.
+Return to Settings and click **Reload language packs** beside **Open language folder**. The backend immediately rescans the active `data/locales/` directory, so the tray process and application do not need to restart.
 
 ### Validate a language pack
 
@@ -258,7 +286,7 @@ The incremental-update policy is:
 - **Update available** means the pack remains usable but has missing, changed, or retired keys.
 - **File error/corrupt** means the pack cannot be safely loaded.
 - When a language does not appear, confirm that the file is under `data/locales/`, uses `.json`, has a valid language-tag filename, and contains valid JSON.
-- Fully quit the tray process before restarting ClipAnchor.
+- After editing a file, click **Reload language packs**. If it still does not appear, verify the active language-directory path shown in Settings.
 - English fallback text usually indicates missing message keys.
 - Broken runtime text usually indicates that an original `{...}` placeholder was changed or removed.
 
@@ -297,7 +325,7 @@ ClipAnchor processes copied text, images, and file paths.
 
 ClipAnchor can silently check GitHub Releases at startup when **Auto update** is enabled in Settings. Startup checks do not open the update card for checking, no-update, generic failures, or releases without a compatible package.
 
-A foreground prompt appears only when an update is actionable, such as when a compatible package is ready to install or automatic download failed and the user must choose whether to open the release asset.
+A foreground prompt appears only when a compatible package is ready to install. Network and download failures remain visible during manual checks but do not create a repeated startup prompt.
 
 The manual **Check update** button opens an in-app status card immediately and can show checking, downloading, ready-to-install, no-update, incompatible-asset, or failure states. Release tags should use `pre-release-v...` or `release-v...`.
 
@@ -307,7 +335,7 @@ Asset selection is automatic:
 - macOS uses DMG and filters architecture-specific filenames so Apple Silicon selects ARM64 or universal packages rather than Intel-only packages.
 - Linux selects DEB or RPM according to the distribution family.
 
-Before each check, old packages under `data/updates/` are removed so stale installers are not reused accidentally. Newly downloaded packages are stored in `data/updates/` and opened through the system installer when the user chooses **Install now**.
+A complete package under `data/updates/` is reused only when its release-asset fingerprint and expected size match. Downloads are written to a temporary sibling file and renamed only after validation; older installer packages are pruned after the new package is ready. **Install now** uses a detached platform handoff and restarts ClipAnchor after a successful replacement when supported.
 
 ## Project layout
 

@@ -64,7 +64,7 @@ Copy the completed file to:
 data/locales/
 ```
 
-Fully quit ClipAnchor, including the tray process, and restart it.
+Return to Settings and click **Reload language packs** beside **Open language folder**. ClipAnchor rescans the active directory immediately without restarting.
 
 ## 6. Update detection
 

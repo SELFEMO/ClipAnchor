@@ -1,7 +1,7 @@
-use crate::{app_log, autostart, clipboard_service, database, models::{AppSettings, AppState, BootstrapPayload, ClipItem, ClipKind, HistoryRecord, LanguageMessageStatus, LanguagePackPayload, PathPayload, UpdateStatusPayload}, popup, settings, update_service};
+use crate::{app_log, autostart, clipboard_service, database, models::{AppSettings, AppState, BootstrapPayload, ClipItem, ClipKind, HistoryRecord, LanguageMessageStatus, LanguagePackPayload, PathPayload, PlatformCapabilities, ShortcutConflictPayload, ShortcutSettings, UpdateStatusPayload}, popup, settings, update_service};
 use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
-use std::{collections::HashMap, fs, io::{Read, Write}, path::Path, process::Command, thread, time::Duration};
+use std::{collections::{HashMap, HashSet}, fs, io::{Read, Write}, path::Path, process::Command, thread, time::Duration};
 
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::{Foundation::HWND, UI::WindowsAndMessaging::{FindWindowW, IsZoomed, ShowWindow, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE}};
@@ -166,7 +166,7 @@ fn language_pack_reference_messages(value: serde_json::Value) -> HashMap<String,
 
 fn language_text_hash(value: &str) -> String {
     // FNV-1a is intentionally used as a lightweight change fingerprint. It matches the
-    // existing 0.5.6 language-pack metadata and is not intended as a security hash.
+    // existing legacy language-pack metadata and is not intended as a security hash.
     let mut hash: u32 = 0x811c9dc5;
     for byte in value.as_bytes() {
         hash ^= u32::from(*byte);
@@ -189,17 +189,38 @@ fn language_pack_for_disk(pack: &LanguagePackPayload) -> LanguagePackPayload {
 }
 
 #[tauri::command]
-pub fn list_language_packs(required_keys: serde_json::Value, state: State<'_, AppState>) -> Result<Vec<LanguagePackPayload>, String> {
+pub fn list_language_packs(required_keys: serde_json::Value, app: AppHandle, state: State<'_, AppState>) -> Result<Vec<LanguagePackPayload>, String> {
     let reference_messages = language_pack_reference_messages(required_keys);
     let mut required_keys = reference_messages.keys().cloned().collect::<Vec<_>>();
     required_keys.sort();
     let directory = language_pack_dir(&state);
     fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    // 每次扫描前同步安装包资源与旧目录，是为了让 Linux 安装版和用户手动刷新都能立即发现语言文件，而不依赖一次性的启动时机。
+    // Synchronizing bundled and legacy sources before every scan lets Linux packages and manual refresh discover language files immediately instead of relying on a one-time startup window.
+    let resource_dir = app.path().resource_dir().ok();
+    match crate::paths::sync_language_pack_sources(&state.paths, resource_dir.as_deref()) {
+        Ok(copied) if copied > 0 => app_log::info(&state.paths, "i18n", format!("copied {} extension language file(s) before scan", copied)),
+        Ok(_) => {}
+        Err(error) => app_log::warn(&state.paths, "i18n", format!("language source synchronization failed before scan: {}", error)),
+    }
     app_log::info(&state.paths, "i18n", format!("checking language pack directory {}", directory.to_string_lossy()));
 
-    let mut packs = Vec::new();
+    let mut entries = Vec::new();
     for entry in fs::read_dir(&directory).map_err(|error| error.to_string())? {
-        let entry = entry.map_err(|error| error.to_string())?;
+        match entry {
+            Ok(entry) => entries.push(entry),
+            Err(error) => {
+                // Linux 目录可能含有暂时失效的挂载或符号链接；跳过单个坏条目可避免整个扩展语言列表因此消失。
+                // A Linux directory may contain a transient mount or broken link; skipping one bad entry prevents the entire extension-language list from disappearing.
+                app_log::warn(&state.paths, "i18n", format!("language directory entry skipped: {}", error));
+            }
+        }
+    }
+    entries.sort_by_key(|entry| entry.file_name().to_string_lossy().to_ascii_lowercase());
+
+    let mut packs = Vec::new();
+    let mut seen_codes = HashSet::new();
+    for entry in entries {
         let path = entry.path();
         let is_json = path
             .extension()
@@ -220,27 +241,37 @@ pub fn list_language_packs(required_keys: serde_json::Value, state: State<'_, Ap
                 .and_then(|value| value.to_str())
                 .unwrap_or_default(),
         );
-        if file_code.is_empty() || is_core_language_code(&file_code) {
-            continue;
-        }
+        let diagnostic_code = if file_code.is_empty() { "unknown" } else { file_code.as_str() };
 
         let text = match fs::read_to_string(&path) {
             Ok(value) => value,
             Err(error) => {
-                packs.push(damaged_language_pack(&file_code, &file_name, error.to_string()));
+                packs.push(damaged_language_pack(diagnostic_code, &file_name, error.to_string()));
                 continue;
             }
         };
 
-        let mut pack = match serde_json::from_str::<LanguagePackPayload>(&text) {
+        // 部分 Linux 编辑器会保存 UTF-8 BOM；解析前移除它可避免内容有效但扩展语言选项被误判为损坏。
+        // Some Linux editors save a UTF-8 BOM; removing it before parsing prevents valid language files from being marked corrupt and hidden from selection.
+        let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+        let mut pack = match serde_json::from_str::<LanguagePackPayload>(text) {
             Ok(value) => value,
             Err(error) => {
-                packs.push(damaged_language_pack(&file_code, &file_name, error.to_string()));
+                packs.push(damaged_language_pack(diagnostic_code, &file_name, error.to_string()));
                 continue;
             }
         };
-        pack.code = file_code.clone();
+        let declared_code = normalize_language_code(&pack.code);
+        // Linux 文件名可能包含非 UTF-8 字节或仅作为用户备注；有效 JSON 内声明的语言代码应优先决定选项，而不是强制依赖文件名。
+        // Linux filenames may contain non-UTF-8 bytes or serve only as user notes; a valid JSON-declared language code should define the option instead of requiring the filename.
+        pack.code = if declared_code.is_empty() { file_code.clone() } else { declared_code };
         if pack.code.is_empty() || is_core_language_code(&pack.code) {
+            continue;
+        }
+        if !seen_codes.insert(pack.code.clone()) {
+            // Linux 文件系统区分大小写且允许任意文件名，因此按 JSON 内声明的规范语言代码去重，避免同一语言出现多个等价选项。
+            // Linux file systems are case-sensitive and allow arbitrary filenames, so deduplicating by the canonical code declared in JSON prevents equivalent choices.
+            app_log::warn(&state.paths, "i18n", format!("duplicate language code skipped: {} ({})", pack.code, file_name));
             continue;
         }
         if pack.label.trim().is_empty() {
@@ -693,27 +724,108 @@ pub fn get_bootstrap(state: State<'_, AppState>) -> Result<BootstrapPayload, Str
             locales: state.paths.locales.to_string_lossy().to_string(),
             logs: state.paths.logs.to_string_lossy().to_string(),
         },
+        capabilities: PlatformCapabilities {
+            platform: std::env::consts::OS.to_string(),
+            // Linux 桌面尤其是 Wayland 不允许应用可靠指定顶层窗口坐标，因此前端必须隐藏会产生错误预期的定位入口。
+            // Linux desktops, especially Wayland, do not let apps reliably choose top-level window coordinates, so the UI must hide a control that would create a false promise.
+            popup_position_supported: popup::popup_position_supported(),
+            // Linux 桌面对全局快捷键的授权与实现差异较大；显式关闭能力可让前端像弹窗定位一样隐藏不可靠的入口。
+            // Linux desktop authorization and global-shortcut implementations vary widely; disabling the capability lets the frontend hide the unreliable entry just like popup positioning.
+            global_shortcuts_supported: crate::shortcut::global_shortcuts_supported(),
+        },
         app_version: env!("CARGO_PKG_VERSION").to_string(),
     })
 }
 
 #[tauri::command]
+pub fn check_shortcut_conflicts(
+    shortcuts: ShortcutSettings,
+) -> Result<Vec<ShortcutConflictPayload>, String> {
+    if !crate::shortcut::global_shortcuts_supported() {
+        // Linux 不展示快捷键设置，因此也不执行无意义的系统冲突探测，避免触发桌面环境兼容逻辑。
+        // Linux does not expose shortcut settings, so system conflict probing is skipped to avoid invoking desktop-integration compatibility paths.
+        return Ok(Vec::new());
+    }
+    // 冲突扫描是只读诊断，独立于保存流程运行；这样默认组合一打开设置页就能提示，而不会先修改系统快捷键。
+    // Conflict scanning is read-only and separate from saving, so default bindings can warn immediately when Settings opens without first changing OS shortcuts.
+    Ok(crate::shortcut::detect_shortcut_conflicts(&shortcuts))
+}
+
+#[tauri::command]
 pub fn save_settings(mut settings_value: AppSettings, app: AppHandle, state: State<'_, AppState>) -> Result<AppSettings, String> {
     settings::normalize_translation_settings(&mut settings_value, true);
+
+    let previous_settings = state
+        .settings
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
+    if !crate::shortcut::global_shortcuts_supported() {
+        // Linux 前端不会提交快捷键修改；继续保留已存字段是为了兼容现有配置文件，同时确保普通设置保存不会重新启用旧后端。
+        // The Linux frontend never submits shortcut edits; preserving stored fields keeps existing settings compatible while ensuring normal saves cannot re-enable the retired backend.
+        settings_value.shortcuts = previous_settings.shortcuts.clone();
+    }
     validate_shortcuts(&settings_value)?;
-    app_log::info(&state.paths, "settings", "saving settings from UI");
+    let shortcuts_changed = crate::shortcut::global_shortcuts_supported()
+        && previous_settings.shortcuts != settings_value.shortcuts;
+
+    // 只有快捷键字段真正变化时才重新注册系统快捷键，避免切换语言、主题等普通设置被 Linux 桌面能力故障阻断。
+    // System shortcuts are re-registered only when shortcut fields actually change, preventing Linux desktop integration failures from blocking ordinary language or theme changes.
+    if shortcuts_changed {
+        crate::shortcut::sync_shortcuts(&app, &settings_value.shortcuts)?;
+    }
+
+    app_log::info(
+        &state.paths,
+        "settings",
+        format!("saving settings from UI; shortcuts_changed={}", shortcuts_changed),
+    );
+
     {
         let mut guard = state.settings.lock().map_err(|error| error.to_string())?;
-        if guard.locale != settings_value.locale {
-            app_log::info(&state.paths, "i18n", format!("active language changed from {} to {}", guard.locale, settings_value.locale));
-        }
         *guard = settings_value.clone();
-        settings::save(&state.paths, &settings_value)?;
+        if let Err(error) = settings::save(&state.paths, &settings_value) {
+            // 保存失败时恢复内存设置和旧快捷键，避免界面、配置文件与系统注册状态分别停留在不同版本。
+            // On persistence failure, restore both in-memory settings and the previous shortcuts so the UI, settings file, and OS registration cannot diverge.
+            *guard = previous_settings.clone();
+            drop(guard);
+            if shortcuts_changed {
+                if let Err(restore_error) = crate::shortcut::sync_shortcuts(&app, &previous_settings.shortcuts) {
+                    app_log::warn(
+                        &state.paths,
+                        "shortcut",
+                        format!("could not restore previous shortcuts after settings save failure: {}", restore_error),
+                    );
+                }
+            }
+            return Err(error);
+        }
     }
-    crate::shortcut::sync_shortcuts(&app, &settings_value.shortcuts)?;
+
+    if previous_settings.locale != settings_value.locale {
+        app_log::info(
+            &state.paths,
+            "i18n",
+            format!(
+                "active language changed from {} to {}",
+                previous_settings.locale, settings_value.locale
+            ),
+        );
+    }
+    if previous_settings.theme != settings_value.theme {
+        app_log::info(
+            &state.paths,
+            "theme",
+            format!(
+                "active theme changed from {} to {}",
+                previous_settings.theme, settings_value.theme
+            ),
+        );
+    }
+
     let _ = crate::tray::refresh_tray(&app);
-    // 设置保存后广播给所有弹窗，是为了让已打开的弹窗也能立即跟随主界面深浅主题变化。
-    // Broadcasting saved settings lets already-open popups follow main-window theme changes immediately.
+    // 设置保存后广播给所有弹窗，是为了让已打开的弹窗也能立即跟随主界面深浅主题或扩展语言变化。
+    // Broadcasting saved settings lets already-open popups immediately follow main-window theme or extension-language changes.
     let _ = app.emit("clipanchor-settings-changed", settings_value.clone());
     Ok(settings_value)
 }
@@ -775,7 +887,10 @@ pub fn set_privacy_filter_mode(mode: String, app: AppHandle, state: State<'_, Ap
 pub fn set_autostart(enabled: bool, app: AppHandle, state: State<'_, AppState>) -> Result<AppSettings, String> {
     app_log::info(&state.paths, "settings", format!("autostart set to {}", enabled));
     autostart::apply(enabled, &state.paths.root)?;
-    let updated = update_settings_flag(&state, |settings| settings.auto_start = enabled)?;
+    // 写入后立即从系统启动项重新读取，是为了让界面展示真实状态，而不是仅相信刚才的布尔参数。
+    // Reading the OS entry immediately after writing keeps the UI tied to the real autostart state instead of trusting only the requested boolean.
+    let actual = autostart::reconcile(enabled, &state.paths.root)?;
+    let updated = update_settings_flag(&state, |settings| settings.auto_start = actual)?;
     let _ = crate::tray::refresh_tray(&app);
     // 自启动状态也广播统一设置事件，是为了让同一进程内的设置页、托盘和其他窗口立即使用同一个真实值。
     // Autostart also emits the shared settings event so Settings, tray, and other windows in the same process immediately use one authoritative value.
@@ -1647,17 +1762,5 @@ pub fn dismiss_update_prompt(state: State<'_, AppState>) -> Result<UpdateStatusP
 }
 
 fn validate_shortcuts(settings_value: &AppSettings) -> Result<(), String> {
-    let shortcuts = [
-        &settings_value.shortcuts.toggle_pin_service,
-        &settings_value.shortcuts.toggle_history_service,
-        &settings_value.shortcuts.toggle_main_window,
-        &settings_value.shortcuts.enter_light_mode,
-        &settings_value.shortcuts.toggle_theme_mode,
-    ];
-    for (index, shortcut) in shortcuts.iter().enumerate() {
-        if shortcuts.iter().skip(index + 1).any(|other| *other == *shortcut) {
-            return Err(format!("Shortcut conflict: {}", shortcut));
-        }
-    }
-    Ok(())
+    crate::shortcut::validate_shortcut_settings(&settings_value.shortcuts)
 }

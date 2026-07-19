@@ -1,6 +1,6 @@
 #![allow(unexpected_cfgs)]
-// objc 0.2 的消息宏内部仍会声明 cargo-clippy cfg；新版 Rust 会把它报告为依赖宏噪声，因此在本模块内收敛该告警，避免正式构建输出被无关警告污染。
-// The objc 0.2 messaging macros still declare the cargo-clippy cfg; newer Rust reports it as dependency-macro noise, so this module contains the allowance to keep release builds free of unrelated warnings.
+// 旧版 objc 消息宏内部仍会声明 cargo-clippy cfg；新版 Rust 会把它报告为依赖宏噪声，因此在本模块内收敛该告警，避免正式构建输出被无关警告污染。
+// Legacy objc messaging macros still declare the cargo-clippy cfg; newer Rust reports it as dependency-macro noise, so this module contains the allowance to keep release builds free of unrelated warnings.
 
 #[cfg(target_os = "macos")]
 #[allow(unused_imports)]

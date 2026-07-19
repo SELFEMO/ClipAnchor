@@ -1,6 +1,12 @@
 use tauri::{AppHandle, Emitter, Manager};
 
-const STARTUP_LITE_ARGS: [&str; 4] = ["--clipanchor-startup", "--startup", "--background", "--lite"];
+const STARTUP_LITE_ARGS: [&str; 5] = [
+    "--clipanchor-startup",
+    "--clipanchor-dbus-activated",
+    "--startup",
+    "--background",
+    "--lite",
+];
 
 pub fn should_start_in_lite_mode() -> bool {
     std::env::args().any(|arg| STARTUP_LITE_ARGS.iter().any(|candidate| arg == *candidate))

@@ -7,6 +7,8 @@ const targets = [
   join('src-tauri', 'target')
 ];
 
+let failed = false;
+
 for (const target of targets) {
   const path = join(root, target);
   try {
@@ -17,10 +19,12 @@ for (const target of targets) {
     await rm(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
     console.log(`cleaned ${target}`);
   } catch (error) {
-    console.warn(`skip ${target}: ${error.message}`);
+    failed = true;
+    console.error(`failed to clean ${target}: ${error.message}`);
   }
 }
 
 console.log('preserved package-lock.json');
 console.log('preserved src-tauri/Cargo.lock');
-console.log('clean finished');
+if (failed) process.exitCode = 1;
+else console.log('clean finished');

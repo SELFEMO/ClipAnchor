@@ -667,58 +667,260 @@ fn shell_quote(value: &str) -> String {
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
+#[derive(Debug)]
+struct LinuxAutostartState {
+    enabled: bool,
+    command_matches_current_executable: bool,
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
 fn reconcile_linux(enabled_from_settings: bool, root: &Path) -> Result<bool, String> {
-    let desktop = linux_autostart_path()?;
-    if !enabled_from_settings {
-        if desktop.exists() {
-            apply_linux(false, root)?;
+    let existing = linux_autostart_candidates()?
+        .into_iter()
+        .find(|path| path.is_file());
+
+    let Some(desktop) = existing else {
+        if enabled_from_settings {
+            apply_linux(true, root)?;
+            return Ok(true);
         }
         return Ok(false);
-    }
+    };
 
-    let expected = linux_autostart_content(root);
-    let current = std::fs::read_to_string(&desktop).unwrap_or_default();
-    if current != expected {
-        // 每次启动比较实际 desktop 文件，是为了在可执行文件移动或系统清理启动项后自动恢复用户已开启的配置。
-        // Comparing the real desktop file on every launch restores an enabled configuration after executable relocation or system cleanup.
-        apply_linux(true, root)?;
+    let state = read_linux_autostart_state(&desktop, root)?;
+    if state.enabled && !state.command_matches_current_executable {
+        // 启动项存在但仍指向旧二进制或携带旧的 portable 参数时，仅修复命令而保持启用状态，避免升级后出现“开关已开但无法启动”。
+        // If an existing entry points to an old binary or still carries the obsolete portable flag, only its command is repaired while preserving the enabled state so upgrades cannot leave an apparently enabled but broken item.
+        write_linux_autostart_file(&linux_autostart_path()?, root)?;
+        if desktop != linux_autostart_path()? {
+            let _ = std::fs::remove_file(desktop);
+        }
     }
-    Ok(desktop.is_file() && std::fs::read_to_string(desktop).unwrap_or_default() == expected)
+    Ok(state.enabled)
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
 fn linux_autostart_path() -> Result<std::path::PathBuf, String> {
+    if let Ok(value) = std::env::var("XDG_CONFIG_HOME") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return Ok(Path::new(trimmed)
+                .join("autostart")
+                .join("clipanchor.desktop"));
+        }
+    }
     let home = std::env::var("HOME").map_err(|error| error.to_string())?;
-    Ok(Path::new(&home).join(".config/autostart/clipanchor.desktop"))
+    Ok(Path::new(&home)
+        .join(".config")
+        .join("autostart")
+        .join("clipanchor.desktop"))
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn linux_autostart_candidates() -> Result<Vec<std::path::PathBuf>, String> {
+    let primary = linux_autostart_path()?;
+    let mut candidates = vec![primary.clone()];
+    if let Ok(home) = std::env::var("HOME") {
+        let legacy = Path::new(&home)
+            .join(".config")
+            .join("autostart")
+            .join("clipanchor.desktop");
+        if legacy != primary {
+            candidates.push(legacy);
+        }
+    }
+    Ok(candidates)
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
 fn linux_executable(root: &Path) -> std::path::PathBuf {
-    std::env::current_exe().unwrap_or_else(|_| root.join("clipanchor"))
+    std::env::current_exe()
+        .or_else(|_| {
+            let candidate = root.join("clipanchor");
+            if candidate.is_file() {
+                Ok(candidate)
+            } else {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "clipanchor executable is unavailable",
+                ))
+            }
+        })
+        .map(|path| path.canonicalize().unwrap_or(path))
+        .unwrap_or_else(|_| root.join("clipanchor"))
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
 fn desktop_exec_quote(path: &Path) -> String {
-    format!("\"{}\"", path.to_string_lossy().replace('\"', "\\\""))
+    format!(
+        "\"{}\"",
+        path.to_string_lossy()
+            .replace('\\', "\\\\")
+            .replace('\"', "\\\"")
+            .replace('`', "\\`")
+            .replace('$', "\\$")
+    )
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
 fn linux_autostart_content(root: &Path) -> String {
     format!(
-        "[Desktop Entry]\nType=Application\nName=ClipAnchor\nExec={} --portable --clipanchor-startup\nTerminal=false\nX-GNOME-Autostart-enabled=true\n",
+        "[Desktop Entry]\nType=Application\nName=ClipAnchor\nComment=Start ClipAnchor quietly in Lite mode\nExec={} --clipanchor-startup\nTerminal=false\nHidden=false\nNoDisplay=false\nStartupNotify=false\nX-GNOME-Autostart-enabled=true\n",
         desktop_exec_quote(&linux_executable(root))
     )
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
 fn apply_linux(enabled: bool, root: &Path) -> Result<(), String> {
-    let desktop = linux_autostart_path()?;
+    let candidates = linux_autostart_candidates()?;
     if !enabled {
-        let _ = std::fs::remove_file(desktop);
+        for desktop in candidates {
+            match std::fs::remove_file(&desktop) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(format!(
+                        "cannot remove Linux autostart entry {}: {}",
+                        desktop.display(),
+                        error
+                    ))
+                }
+            }
+        }
         return Ok(());
     }
-    if let Some(dir) = desktop.parent() {
-        std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
+
+    let desktop = linux_autostart_path()?;
+    write_linux_autostart_file(&desktop, root)?;
+    for legacy in candidates {
+        if legacy != desktop {
+            let _ = std::fs::remove_file(legacy);
+        }
     }
-    std::fs::write(desktop, linux_autostart_content(root)).map_err(|error| error.to_string())
+    Ok(())
 }
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn write_linux_autostart_file(desktop: &Path, root: &Path) -> Result<(), String> {
+    let directory = desktop
+        .parent()
+        .ok_or_else(|| "Linux autostart directory is unavailable".to_string())?;
+    std::fs::create_dir_all(directory).map_err(|error| {
+        format!(
+            "cannot create Linux autostart directory {}: {}",
+            directory.display(),
+            error
+        )
+    })?;
+
+    let temporary = directory.join(format!(
+        ".clipanchor.desktop.{}.tmp",
+        std::process::id()
+    ));
+    std::fs::write(&temporary, linux_autostart_content(root)).map_err(|error| {
+        format!(
+            "cannot write Linux autostart entry {}: {}",
+            temporary.display(),
+            error
+        )
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o644))
+            .map_err(|error| error.to_string())?;
+    }
+    // 临时文件完成后再原子替换，可避免桌面环境恰好扫描到半写入的 desktop 文件并把它判定为无效启动项。
+    // Replacing the entry atomically after the temporary file is complete prevents the desktop environment from scanning a partially written desktop file and marking it invalid.
+    std::fs::rename(&temporary, desktop).map_err(|error| {
+        let _ = std::fs::remove_file(&temporary);
+        format!(
+            "cannot install Linux autostart entry {}: {}",
+            desktop.display(),
+            error
+        )
+    })
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn read_linux_autostart_state(
+    desktop: &Path,
+    root: &Path,
+) -> Result<LinuxAutostartState, String> {
+    let content = std::fs::read_to_string(desktop).map_err(|error| {
+        format!(
+            "cannot read Linux autostart entry {}: {}",
+            desktop.display(),
+            error
+        )
+    })?;
+    let hidden = desktop_boolean(&content, "Hidden").unwrap_or(false);
+    let gnome_enabled =
+        desktop_boolean(&content, "X-GNOME-Autostart-enabled").unwrap_or(true);
+    let exec = desktop_value(&content, "Exec").unwrap_or_default();
+    let configured_executable = desktop_exec_executable(exec);
+    let expected_executable = linux_executable(root);
+    let command_matches_current_executable = configured_executable
+        .map(|path| linux_paths_equal(&path, &expected_executable))
+        .unwrap_or(false)
+        && exec.split_whitespace().any(|part| part == "--clipanchor-startup")
+        && !exec.split_whitespace().any(|part| part == "--portable");
+
+    Ok(LinuxAutostartState {
+        enabled: !hidden && gnome_enabled,
+        command_matches_current_executable,
+    })
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn desktop_value<'a>(content: &'a str, key: &str) -> Option<&'a str> {
+    content.lines().find_map(|line| {
+        let line = line.trim();
+        let value = line.strip_prefix(key)?.strip_prefix('=')?;
+        Some(value.trim())
+    })
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn desktop_boolean(content: &str, key: &str) -> Option<bool> {
+    match desktop_value(content, key)?.to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" => Some(true),
+        "false" | "0" | "no" => Some(false),
+        _ => None,
+    }
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn desktop_exec_executable(command: &str) -> Option<std::path::PathBuf> {
+    let command = command.trim();
+    if let Some(rest) = command.strip_prefix('\"') {
+        let mut escaped = false;
+        let mut executable = String::new();
+        for character in rest.chars() {
+            if escaped {
+                executable.push(character);
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '\"' {
+                return Some(std::path::PathBuf::from(executable));
+            } else {
+                executable.push(character);
+            }
+        }
+        return None;
+    }
+    command
+        .split_whitespace()
+        .next()
+        .map(std::path::PathBuf::from)
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn linux_paths_equal(left: &Path, right: &Path) -> bool {
+    left.canonicalize().unwrap_or_else(|_| left.to_path_buf())
+        == right
+            .canonicalize()
+            .unwrap_or_else(|_| right.to_path_buf())
+}
+

@@ -109,10 +109,32 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            // 第二次启动只唤醒已有主窗口，是为了避免两个进程同时监听剪贴板和写入同一个便携数据库。
-            // A second launch only wakes the existing main window so two processes cannot monitor the clipboard and write the same portable database.
-            app_log::info(&app.state::<AppState>().paths, "single_instance", "second launch requested; activating existing main window");
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            match shortcut::handle_external_shortcut_args(app, &args) {
+                Ok(true) => {
+                    // 旧 Linux 快捷键项或非 GNOME 后备仍可能通过二次启动传递动作；动作已消费时不能显示主窗口，以免打断轻量模式或服务切换。
+                    // Legacy Linux shortcut entries or non-GNOME fallbacks may still relay an action through a second launch; once consumed, the main window must stay hidden so Lite mode and service toggles are not interrupted.
+                    app_log::info(
+                        &app.state::<AppState>().paths,
+                        "single_instance",
+                        "second launch delivered a global shortcut action",
+                    );
+                    return;
+                }
+                Ok(false) => {}
+                Err(error) => app_log::warn(
+                    &app.state::<AppState>().paths,
+                    "single_instance",
+                    format!("global shortcut action from second launch failed: {}", error),
+                ),
+            }
+            // 普通重复启动只唤醒已有主窗口，是为了避免两个进程同时监听剪贴板和写入同一个便携数据库。
+            // A normal second launch only wakes the existing main window so two processes cannot monitor the clipboard and write the same portable database.
+            app_log::info(
+                &app.state::<AppState>().paths,
+                "single_instance",
+                "second launch requested; activating existing main window",
+            );
             let _ = crate::window_control::activate_main_window(app);
         }))
         .plugin(shortcut::plugin())
@@ -142,6 +164,7 @@ pub fn run() {
             log_language_pack_event,
             translate_ui_text,
             save_settings,
+            check_shortcut_conflicts,
             set_pin_service,
             set_history_service,
             set_privacy_mode,
@@ -189,7 +212,22 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             let state = app.state::<AppState>().inner().clone();
+            let startup_shortcut_action = shortcut::action_from_args(std::env::args());
             let _ = app_log::init(&state.paths);
+            // 安装资源必须在首次扫描前同步到可写数据目录，否则 Linux 包内的只读资源不会成为可选择的扩展语言。
+            // Bundled resources must be synchronized into the writable data directory before the first scan, or Linux package resources cannot become selectable extension languages.
+            let resource_dir = app.path().resource_dir().ok();
+            match paths::sync_language_pack_sources(&state.paths, resource_dir.as_deref()) {
+                Ok(copied) if copied > 0 => log_startup_issue(
+                    &state,
+                    &format!("Seeded {} extension language file(s) into the active data directory", copied),
+                ),
+                Ok(_) => log_startup_issue(&state, "Extension language directory synchronized"),
+                Err(error) => log_startup_issue(
+                    &state,
+                    &format!("Extension language synchronization skipped: {}", error),
+                ),
+            }
             log_startup_issue(&state, "Tauri setup started");
             #[cfg(target_os = "windows")]
             log_startup_issue(
@@ -200,8 +238,8 @@ pub fn run() {
                 ),
             );
             reconcile_autostart_setting(&state);
-            // 启动期的托盘、快捷键和剪贴板监听都降级为可恢复错误，避免某个系统能力失败就让整个程序退出。
-            // Tray, shortcut, and clipboard startup failures are treated as recoverable so one OS capability cannot close the whole app.
+            // 启动期的托盘、受支持平台快捷键和剪贴板监听都降级为可恢复错误，避免某个系统能力失败就让整个程序退出。
+            // Tray, supported-platform shortcuts, and clipboard startup failures are treated as recoverable so one OS capability cannot close the whole app.
             if let Err(error) = app_menu::install(app.handle()) {
                 log_startup_issue(&state, &format!("Application menu initialization skipped: {}", error));
             }
@@ -225,18 +263,33 @@ pub fn run() {
                 Ok(settings) => {
                     if let Err(error) = shortcut::sync_shortcuts(&handle, &settings.shortcuts) {
                         log_startup_issue(&state, &format!("Global shortcut registration skipped: {}", error));
-                    } else {
+                    } else if shortcut::global_shortcuts_supported() {
                         log_startup_issue(&state, "Global shortcuts initialized");
+                    } else {
+                        log_startup_issue(&state, "Linux global shortcuts intentionally unavailable; settings entry hidden");
                     }
                 }
                 Err(error) => log_startup_issue(&state, &format!("Settings lock unavailable during startup: {}", error)),
+            }
+            if let Some(action) = startup_shortcut_action {
+                if let Err(error) = shortcut::handle_startup_shortcut(&handle, action) {
+                    log_startup_issue(
+                        &state,
+                        &format!("Startup global shortcut action failed: {}", error),
+                    );
+                } else {
+                    log_startup_issue(&state, "Startup global shortcut action handled");
+                }
             }
             if let Some(window) = handle.get_webview_window("main") {
                 let _ = window.set_shadow(false);
                 // 主窗口使用透明 WebView 加单层 CSS 圆角，是为了避开 Windows 无边框窗口的隐藏缩放边框被 Region 裁剪后露出的直线边缘。
                 // The main window uses a transparent WebView plus one CSS radius to avoid exposing straight hidden resize borders after Windows Region clipping.
             }
-            let lite_startup = window_control::should_start_in_lite_mode();
+            let lite_startup = window_control::should_start_in_lite_mode()
+                || startup_shortcut_action
+                    .map(shortcut::ShortcutAction::keeps_main_window_hidden)
+                    .unwrap_or(false);
             let auto_update_enabled = state.settings.lock().map(|settings| settings.auto_update_enabled).unwrap_or(true);
             // 启动检查是否运行由设置控制，是为了让“自动更新”开关真正阻止后台网络请求。
             // Startup checking is controlled by Settings so the Auto Update switch truly prevents background network requests.

@@ -207,6 +207,11 @@ export default function App() {
       setUpdateStatus(event.payload);
       if (event.payload?.prompt_on_main_open) {
         setUpdateDialogOpen(true);
+        // 只有事件确实抵达可见主界面后才消费提示位，是为了既不丢失后台检查结果，也不让同一提示在以后每次唤醒时重复出现。
+        // The prompt bit is consumed only after the event reaches a visible main window, preserving missed background results while preventing the same prompt from reopening on every later wake.
+        api.dismissUpdatePrompt()
+          .then((persisted) => setUpdateStatus((current) => ({ ...(persisted || {}), ...(current || {}), prompt_on_main_open: false })))
+          .catch((error) => console.error('ClipAnchor update prompt consumption failed:', error));
       }
     });
     const activationUnlistenPromise = listen('clipanchor-main-window-activated', async () => {
@@ -328,21 +333,39 @@ export default function App() {
     // 主题切换直接写入共享设置，是为了让主窗口、弹窗和下次启动保持同一套视觉状态。
     // Theme changes are persisted through shared settings so the main window, popups, and next launch keep one visual state.
     const nextTheme = isDark ? 'light' : 'dark';
-    const saved = await api.saveSettings({ ...boot.settings, theme: nextTheme });
-    setBoot({ ...boot, settings: saved });
+    const previousSettings = boot.settings;
+    // 先更新 React 状态可让 Linux WebView 立即切换；保存失败时再回滚，避免系统调用延迟让按钮看似无效。
+    // Updating React first makes the Linux WebView switch immediately; a failed save rolls back instead of making the button appear unresponsive during system calls.
+    setBoot({ ...boot, settings: { ...boot.settings, theme: nextTheme } });
+    try {
+      const saved = await api.saveSettings({ ...boot.settings, theme: nextTheme });
+      setBoot((current) => ({ ...current, settings: saved }));
+    } catch (error) {
+      setBoot((current) => ({ ...current, settings: previousSettings }));
+      console.error('ClipAnchor theme switch failed:', error);
+    }
   }
 
   async function checkUpdate() {
+    const updateBusy = ['checking', 'downloading', 'installing'].includes(updateStatus?.status);
+    if (updateBusy) {
+      // 连续点击只重新打开当前进度，而不再发送新请求，是为了与后端单飞锁共同阻断重复检查和重复下载。
+      // Repeated clicks only reopen the current progress instead of issuing another request, complementing the backend single-flight guard against duplicate checks and downloads.
+      setUpdateDialogOpen(true);
+      return;
+    }
     // 手动检查先打开进度页，是为了让网络慢或 GitHub 响应慢时用户也能明确知道按钮已经生效。
     // Manual checks open the progress page first so users know the click worked even when network or GitHub responses are slow.
-    setUpdateStatus({ status: 'checking', service_enabled: true, prompt_on_main_open: true, current_version: updateStatus?.current_version || '' });
+    setUpdateStatus({ status: 'checking', service_enabled: true, prompt_on_main_open: false, attention_required: false, current_version: updateStatus?.current_version || '' });
     setUpdateDialogOpen(true);
     try {
       const status = await api.checkUpdate('manual');
       setUpdateStatus(status);
     } catch (error) {
       console.error('ClipAnchor update check failed:', error);
-      setUpdateStatus({ status: 'update_failed', update_failed: true, attention_required: true, prompt_on_main_open: true, message: String(error) });
+      // 手动检查窗口已经可见，因此错误无需写入下次启动提示位，否则会把一次网络错误变成重复弹窗。
+      // The manual-check window is already visible, so an error must not set a next-launch prompt bit that would turn one network failure into repeated dialogs.
+      setUpdateStatus({ status: 'update_failed', update_failed: true, attention_required: false, prompt_on_main_open: false, message: String(error) });
     }
   }
 
@@ -379,12 +402,15 @@ export default function App() {
   }
 
   const pageTitle = tab === 'favorites' ? t('favoritesTitle') : (tab === 'clipboard' ? t('clipboardTitle') : t('settingsTitle'));
-  const pageSubtitle = tab === 'favorites' ? t('favoritesSubtitle') : (tab === 'clipboard' ? t('clipboardSubtitle') : t('settingsSubtitle'));
+  const PageIcon = tab === 'favorites' ? Star : (tab === 'clipboard' ? ClipboardList : Settings);
   const privacyMode = boot.settings.privacy_filter_mode || (boot.settings.privacy_mode ? 'light' : 'off');
   const privacyStatus = privacyMode === 'off' ? t('privacyOff') : `${t('privacyOn')} · ${privacyMode === 'smart' ? t('privacySmartMode') : t('privacyLightMode')}`;
-  // 侧边栏快捷键徽标使用平台化显示，是为了避免 macOS 用户看到 Windows 式 Ctrl 命名而误按 Command。
-  // The sidebar shortcut badge uses platform-aware labels so macOS users do not mistake Windows-style Ctrl naming for Command.
-  const pinServiceShortcutTokens = shortcutDisplayTokens(boot.settings.shortcuts?.toggle_pin_service || 'Ctrl+Shift+P');
+  // 侧边栏快捷键徽标只在后端声明支持时显示，并使用平台化键名，避免 Linux 暴露无效入口或 macOS 用户误认 Ctrl。
+  // The sidebar shortcut badge appears only when the backend declares support and uses platform-aware labels, avoiding an invalid Linux entry and Ctrl confusion on macOS.
+  const globalShortcutsSupported = boot.capabilities?.global_shortcuts_supported !== false;
+  const pinServiceShortcutTokens = globalShortcutsSupported
+    ? shortcutDisplayTokens(boot.settings.shortcuts?.toggle_pin_service || 'Ctrl+Shift+P')
+    : [];
 
   return (
     <main className={`app-shell codex-shell ${themeClass} ${motionClass} ${isWindowMaximized ? 'window-maximized' : ''}`} style={{ '--ui-scale': uiScale }}>
@@ -424,7 +450,9 @@ export default function App() {
           </nav>
 
           <div className="sidebar-footer">
-            <div className="shortcut-hint">{pinServiceShortcutTokens.map((token) => <kbd key={token}>{token}</kbd>)}<span>{t('pinService')}</span></div>
+            {globalShortcutsSupported ? (
+              <div className="shortcut-hint">{pinServiceShortcutTokens.map((token) => <kbd key={token}>{token}</kbd>)}<span>{t('pinService')}</span></div>
+            ) : null}
             <div className="sidebar-action-row sidebar-action-row-split">
               <div className="sidebar-left-actions">
               <button className="square-icon-button" onClick={toggleTheme} title={isDark ? t('light') : t('dark')} aria-label={isDark ? t('light') : t('dark')}>
@@ -443,11 +471,12 @@ export default function App() {
         </aside>
 
         <section className="codex-main">
-          <header className="workspace-header">
-            <div className="title-block">
-              <p className="eyebrow">{tab === 'favorites' ? t('favoritesEyebrow') : (tab === 'clipboard' ? t('clipboardEyebrow') : t('settingsEyebrow'))}</p>
+          <header className="workspace-header compact-workspace-header">
+            {/* 页面外壳只保留统一的图标与名词型标题，是为了消除重复说明并让三个主页面在相同位置形成稳定的导航锚点。 */}
+            {/* The page shell keeps only a consistent icon and noun-style title so repeated explanations disappear and all three main views share one stable navigation anchor. */}
+            <div className="workspace-heading">
+              <span className="workspace-heading-icon" aria-hidden="true"><PageIcon size={18} strokeWidth={1.8} /></span>
               <h1>{pageTitle}</h1>
-              <p className="page-subtitle">{pageSubtitle}</p>
             </div>
           </header>
 

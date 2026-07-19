@@ -34,11 +34,32 @@ fn should_print_version() -> bool {
     std::env::args().skip(1).any(|arg| arg == "--version" || arg == "-V")
 }
 
+#[cfg(target_os = "linux")]
+fn retired_linux_shortcut_invocation() -> bool {
+    std::env::args().skip(1).any(|argument| {
+        argument.starts_with("--clipanchor-shortcut=")
+            || argument.starts_with("--clipanchor-trigger-file=")
+            || argument == "--clipanchor-shortcut-probe"
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn retired_linux_shortcut_invocation() -> bool {
+    false
+}
+
+
 fn main() {
     if should_print_version() {
         // 版本号只从 Cargo 元数据读取，是为了避免命令行输出、安装包版本和应用元数据出现多处维护导致的不一致。
         // The version is read only from Cargo metadata so CLI output, installer metadata, and app metadata cannot drift across duplicated sources.
         print_cli_line(&format!("ClipAnchor v{}", env!("CARGO_PKG_VERSION")));
+        return;
+    }
+
+    if retired_linux_shortcut_invocation() {
+        // 旧版本创建的 Linux 快捷键命令必须在 GUI 初始化前静默退出，避免已停用功能意外唤醒主窗口。
+        // Retired Linux shortcut commands exit before GUI initialization so obsolete desktop entries cannot unexpectedly wake the main window.
         return;
     }
 

@@ -66,8 +66,10 @@ function languageSuffix(file) {
 fs.mkdirSync(releaseDir, { recursive: true });
 const artifacts = walk(bundleRoot).filter((file) => wanted.has(path.extname(file).toLowerCase()));
 if (!artifacts.length) {
-  console.warn(`No installer artifacts found under ${bundleRoot}`);
-  process.exit(0);
+  // 构建成功后却找不到安装包属于发布失败而不是可忽略警告，返回非零状态可避免 CI 误报成功。
+  // Missing installers after a successful build is a release failure rather than an ignorable warning, so a nonzero status prevents false-positive CI success.
+  console.error(`No installer artifacts found under ${bundleRoot}`);
+  process.exit(1);
 }
 
 for (const artifact of artifacts) {

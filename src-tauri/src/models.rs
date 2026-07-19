@@ -39,7 +39,7 @@ pub struct HistoryRecord {
     pub is_pinned: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ShortcutSettings {
     pub toggle_pin_service: String,
@@ -59,6 +59,14 @@ impl Default for ShortcutSettings {
             toggle_theme_mode: "Ctrl+Shift+T".into(),
         }
     }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ShortcutConflictPayload {
+    pub shortcut_key: String,
+    pub shortcut: String,
+    pub kind: String,
+    pub source: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -245,9 +253,17 @@ impl Default for LanguagePackPayload {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PlatformCapabilities {
+    pub platform: String,
+    pub popup_position_supported: bool,
+    pub global_shortcuts_supported: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BootstrapPayload {
     pub settings: AppSettings,
     pub paths: PathPayload,
+    pub capabilities: PlatformCapabilities,
     pub app_version: String,
 }
 

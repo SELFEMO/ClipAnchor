@@ -21,6 +21,7 @@ export const api = {
   resizePopup: (id, width, height) => invoke('resize_popup', { id, width, height }),
   refreshPopupShape: (id) => invoke('refresh_popup_shape', { id }),
   saveSettings: (settings) => invoke('save_settings', { settingsValue: settings }),
+  checkShortcutConflicts: (shortcuts) => invoke('check_shortcut_conflicts', { shortcuts }),
   setPinService: (enabled) => invoke('set_pin_service', { enabled }),
   setHistoryService: (enabled) => invoke('set_history_service', { enabled }),
   setPrivacyMode: (enabled) => invoke('set_privacy_mode', { enabled }),

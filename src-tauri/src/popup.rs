@@ -1,6 +1,10 @@
-use crate::{app_log, models::{AppSettings, AppState, ClipItem, ClipKind}, settings};
+use crate::{app_log, models::{AppSettings, AppState, ClipItem, ClipKind}};
+#[cfg(not(target_os = "linux"))]
+use crate::settings;
 use std::{thread, time::Duration};
-use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Position, Size, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, Size, WebviewUrl, WebviewWindowBuilder};
+#[cfg(not(target_os = "linux"))]
+use tauri::{LogicalPosition, Position};
 
 pub fn create_popup(app: &AppHandle, state: &AppState, item: &ClipItem, settings: &AppSettings) -> Result<(), String> {
     schedule_popup(app, state, item, settings, false)
@@ -54,11 +58,17 @@ fn build_popup_window(app: &AppHandle, state: &AppState, item: &ClipItem, settin
     // Each copy uses its own window so new content never replaces existing popups and can stay always-on-top.
     // 窗口创建时就启用原生可缩放性，是为了避免用户刚点击 Pin 后角标已出现但后端尚未切换 resizable 导致拖拽失效。
     // Native resizability is enabled from creation so the handle cannot appear before the backend has made the window resizable.
-    let window = WebviewWindowBuilder::new(app, label.clone(), url)
+    let builder = WebviewWindowBuilder::new(app, label.clone(), url)
         .title(label.clone())
         .inner_size(popup_width, popup_height)
-        .min_inner_size(260.0, 118.0)
-        .position(x, y)
+        .min_inner_size(260.0, 118.0);
+    #[cfg(not(target_os = "linux"))]
+    let builder = {
+        // 非 Linux 平台支持应用指定窗口初始位置，因此创建阶段直接写入坐标可避免首帧跳动。
+        // Non-Linux platforms allow application-selected initial positions, so assigning coordinates at creation avoids a first-frame jump.
+        builder.position(x, y)
+    };
+    let window = builder
         .decorations(false)
         // 透明窗口是弹窗圆角生效的原生前提；仅靠 CSS 圆角无法裁掉 WebView 宿主窗口的直角底板。
         // A transparent native window is required for popup corners; CSS radius alone cannot clip the square WebView host surface.
@@ -79,14 +89,21 @@ fn build_popup_window(app: &AppHandle, state: &AppState, item: &ClipItem, settin
     let _ = window.set_shadow(false);
     crate::macos_native::configure_popup_for_current_space(&window);
     apply_native_popup_shape(&window);
-    window.set_position(Position::Logical(LogicalPosition { x, y })).map_err(|error| error.to_string())?;
+    apply_popup_position(&window, x, y)?;
     if pinned {
         // 历史记录回放需要一出生就是置顶态，同时启用原生可缩放性，让前端角标能调用系统级 resize 拖拽而不是高频手动改尺寸。
         // History replay must be born pinned and resizable so the frontend corner can use OS-level resize dragging instead of high-frequency manual resizing.
         window.set_always_on_top(true).map_err(|error| error.to_string())?;
         window.set_resizable(true).map_err(|error| error.to_string())?;
     }
-    app_log::info(&state.paths, "popup", format!("popup window built label={} size={:.0}x{:.0} pos={:.0},{:.0}", label, popup_width, popup_height, x, y));
+    let placement = if popup_position_supported() {
+        format!("{:.0},{:.0}", x, y)
+    } else {
+        // Linux 日志明确标记由合成器定位，是为了排查问题时不会把仅用于尺寸计算的坐标误认为已成功应用。
+        // Linux logs explicitly name compositor placement so diagnostic output never mistakes calculation-only coordinates for applied positions.
+        "compositor".to_string()
+    };
+    app_log::info(&state.paths, "popup", format!("popup window built label={} size={:.0}x{:.0} placement={}", label, popup_width, popup_height, placement));
     delayed_show_popup(app, &popup_label(&item.id), pinned, x, y);
     Ok(())
 }
@@ -102,43 +119,38 @@ fn delayed_show_popup(app: &AppHandle, label: &str, pinned: bool, x: f64, y: f64
         let label_for_show = label.clone();
         let _ = handle.run_on_main_thread(move || {
             if let Some(window) = ui_handle.get_webview_window(&label_for_show) {
-                // Linux 窗口管理器常忽略未显示窗口的初始 position；显示前后都设置一次可避免 deb/rpm 包中弹窗总被居中。
-                // Linux window managers often ignore the initial position of hidden windows; setting it before and after show prevents deb/rpm popups from staying centered.
-                let _ = window.set_position(Position::Logical(LogicalPosition { x, y }));
+                // 支持精确定位的平台在显示前后各应用一次坐标，是为了避免窗口映射阶段产生可见跳动；Linux 则由合成器负责落点。
+                // Platforms with exact positioning apply coordinates around mapping to avoid a visible jump, while Linux leaves placement to the compositor.
+                let _ = apply_popup_position(&window, x, y);
                 let _ = window.set_shadow(false);
                 crate::macos_native::configure_popup_for_current_space(&window);
                 let _ = window.show();
-                let _ = window.set_position(Position::Logical(LogicalPosition { x, y }));
+                let _ = apply_popup_position(&window, x, y);
                 // 显示后再次应用圆角 Region，是为了覆盖 WebView2 首次显示时重建底层窗口导致的裁剪丢失。
                 // The rounded region is reapplied after show to survive WebView2 recreating its backing window during first paint.
                 apply_native_popup_shape(&window);
             }
         });
-        schedule_linux_position_reapply(handle, label, x, y);
     });
 }
 
-#[cfg(target_os = "linux")]
-fn schedule_linux_position_reapply(app: AppHandle, label: String, x: f64, y: f64) {
-    for delay in [80_u64, 260_u64] {
-        let handle = app.clone();
-        let label_for_pass = label.clone();
-        thread::spawn(move || {
-            thread::sleep(Duration::from_millis(delay));
-            let ui_handle = handle.clone();
-            let _ = handle.run_on_main_thread(move || {
-                if let Some(window) = ui_handle.get_webview_window(&label_for_pass) {
-                    // GTK/WebKit 在映射窗口后可能再次交给窗口管理器居中；短延迟重放位置让最终落点服从用户设置。
-                    // GTK/WebKit can hand the mapped window back to the window manager for centering; a short replay makes the final landing follow user settings.
-                    let _ = window.set_position(Position::Logical(LogicalPosition { x, y }));
-                }
-            });
-        });
-    }
+#[cfg(not(target_os = "linux"))]
+fn apply_popup_position(window: &tauri::WebviewWindow, x: f64, y: f64) -> Result<(), String> {
+    window
+        .set_position(Position::Logical(LogicalPosition { x, y }))
+        .map_err(|error| error.to_string())
 }
 
-#[cfg(not(target_os = "linux"))]
-fn schedule_linux_position_reapply(_app: AppHandle, _label: String, _x: f64, _y: f64) {}
+#[cfg(target_os = "linux")]
+fn apply_popup_position(_window: &tauri::WebviewWindow, _x: f64, _y: f64) -> Result<(), String> {
+    // Wayland 不提供顶层窗口绝对定位协议，继续重试只会制造抖动和错误预期，因此 Linux 明确交由合成器放置。
+    // Wayland exposes no absolute top-level positioning protocol, so retries only create jitter and false expectations; Linux explicitly delegates placement to the compositor.
+    Ok(())
+}
+
+pub fn popup_position_supported() -> bool {
+    !cfg!(target_os = "linux")
+}
 
 
 
@@ -196,6 +208,15 @@ pub fn refresh_popup_shape(app: &AppHandle, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+pub fn save_position(_app: &AppHandle, state: &AppState, _x: f64, _y: f64) -> Result<(), String> {
+    // Linux 设置页已隐藏定位功能；后端仍接受旧客户端调用但不写入无效坐标，以避免迁移后产生误导状态。
+    // The Linux settings UI hides positioning; the backend still accepts legacy calls but does not persist ineffective coordinates, avoiding misleading migrated state.
+    app_log::warn(&state.paths, "settings", "popup anchor save ignored because Linux compositor placement is not controllable");
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
 pub fn save_position(app: &AppHandle, state: &AppState, x: f64, y: f64) -> Result<(), String> {
     app_log::info(&state.paths, "settings", format!("save popup anchor requested: {:.0},{:.0}", x, y));
     let settings_snapshot = state.settings.lock().map_err(|error| error.to_string())?.clone();
@@ -222,6 +243,9 @@ fn safe_popup_position_for_app(app: &AppHandle, x: f64, y: f64, popup_width: f64
     (safe_x, safe_y)
 }
 
+// Linux 不提供可保存的绝对弹窗锚点，因此通用定位尺寸仅在支持应用控制坐标的平台参与编译，避免 Linux 产生未使用函数警告。
+// Linux does not expose a persistable absolute popup anchor, so this positioning size helper is compiled only where application-controlled coordinates are supported.
+#[cfg(not(target_os = "linux"))]
 fn popup_size(settings: &AppSettings) -> (f64, f64) {
     let scale = (settings.popup_scale_percent as f64).clamp(50.0, 200.0) / 100.0;
     let base_width = if settings.popup_width.is_finite() { settings.popup_width.clamp(280.0, 520.0) } else { 340.0 };

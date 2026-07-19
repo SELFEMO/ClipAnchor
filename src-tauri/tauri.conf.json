@@ -1,5 +1,6 @@
 {
   "productName": "ClipAnchor",
+  "version": "0.6.1",
   "identifier": "com.clipanchor.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -33,14 +34,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": [
-      "nsis",
-      "msi",
-      "app",
-      "dmg",
-      "deb",
-      "rpm"
-    ],
+    "targets": "all",
     "category": "Utility",
     "shortDescription": "Portable clipboard pinning tool",
     "longDescription": "ClipAnchor keeps copied content in compact always-on-top popups and stores optional local history in a portable data directory.",
@@ -66,6 +60,9 @@
           "zh-CN"
         ]
       }
+    },
+    "resources": {
+      "../extension-locales/*": "extension-locales/"
     }
   }
 }

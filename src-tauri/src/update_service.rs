@@ -2,15 +2,16 @@ use crate::{app_log, models::UpdateStatusPayload, paths::DataPaths};
 use chrono::{SecondsFormat, Utc};
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter};
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::os::unix::fs::PermissionsExt;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::process::Stdio;
 use std::{
     cmp::Ordering,
     fs,
     path::{Path, PathBuf},
     process::Command,
+    sync::{atomic::{AtomicBool, Ordering as AtomicOrdering}, Mutex},
     thread,
 };
 
@@ -57,6 +58,27 @@ enum LinuxPackageKind {
     Rpm,
 }
 
+static UPDATE_CHECK_RUNNING: AtomicBool = AtomicBool::new(false);
+static UPDATE_INSTALL_HANDOFF_STARTED: AtomicBool = AtomicBool::new(false);
+static UPDATE_STATUS_LOCK: Mutex<()> = Mutex::new(());
+
+struct UpdateCheckGuard;
+
+impl Drop for UpdateCheckGuard {
+    fn drop(&mut self) {
+        UPDATE_CHECK_RUNNING.store(false, AtomicOrdering::Release);
+    }
+}
+
+fn try_begin_update_check() -> Option<UpdateCheckGuard> {
+    // 同一进程只允许一个检查任务写状态文件，是为了避免启动检查与手动检查互相覆盖、重复下载或重复弹出提示。
+    // Only one check may write the status file per process, preventing startup and manual checks from overwriting each other, downloading twice, or reopening the same prompt.
+    UPDATE_CHECK_RUNNING
+        .compare_exchange(false, true, AtomicOrdering::AcqRel, AtomicOrdering::Acquire)
+        .ok()
+        .map(|_| UpdateCheckGuard)
+}
+
 pub fn startup_background_check(app: &AppHandle, paths: &DataPaths, started_in_lite_mode: bool, auto_update_enabled: bool) -> UpdateStatusPayload {
     if !auto_update_enabled {
         // 自动更新关闭时仍写入明确状态，是为了让设置页显示真实状态且启动阶段不再访问网络。
@@ -67,9 +89,16 @@ pub fn startup_background_check(app: &AppHandle, paths: &DataPaths, started_in_l
         return disabled;
     }
 
+    let Some(check_guard) = try_begin_update_check() else {
+        // 激活已有实例时可能再次走到启动逻辑；复用正在进行的状态可以避免同一轮更新被重复触发。
+        // Activating an existing instance can revisit startup logic; reusing the in-flight status prevents the same update cycle from being triggered again.
+        let existing = read_status(paths).unwrap_or_else(|| checking_status("startup_background"));
+        app_log::info(paths, "update", "startup update check reused an in-flight update task");
+        return existing;
+    };
+
     // 启动检查放入后台线程，是为了让自启动轻量模式和普通启动都不被 GitHub 网络延迟阻塞。
     // Startup checks run in a background thread so GitHub network latency never blocks Lite startup or normal launch.
-    let _ = clear_update_packages(paths);
     let checking = checking_status("startup_background");
     let _ = save_status(paths, &checking);
     app_log::info(
@@ -84,30 +113,13 @@ pub fn startup_background_check(app: &AppHandle, paths: &DataPaths, started_in_l
     let app_for_thread = app.clone();
     let paths_for_thread = paths.clone();
     thread::spawn(move || {
+        let _check_guard = check_guard;
         let status = perform_update_check(&paths_for_thread, "startup_background", true, false);
         let _ = save_status(&paths_for_thread, &status);
 
-        #[cfg(target_os = "windows")]
-        if status.install_ready {
-            // Windows 自动更新必须在下载完成后直接移交给独立安装脚本，是为了让“自动更新”真正完成覆盖安装而不是只停在待安装状态。
-            // Windows auto update is handed to a detached installer script immediately after download so Auto Update completes replacement instead of stopping at a ready-to-install state.
-            app_log::info(&paths_for_thread, "update", "Windows auto update package is ready; starting silent replacement flow");
-            if let Err(error) = install_downloaded_update(&app_for_thread, &paths_for_thread) {
-                app_log::error(&paths_for_thread, "update", format!("Windows auto update install handoff failed: {}", error));
-                let mut failed = status.clone();
-                failed.status = "update_failed".into();
-                failed.update_failed = true;
-                failed.attention_required = true;
-                failed.message = Some("windows_auto_install_handoff_failed".into());
-                let _ = save_status(&paths_for_thread, &failed);
-                let _ = app_for_thread.emit("clipanchor-update-status", failed);
-            }
-            return;
-        }
-
+        // 后台检查只负责准备安装包并提醒，安装必须由用户确认，是为了避免启动时反复提权或失败后循环安装。
+        // Background checks only prepare the package and notify; installation requires user confirmation so startup cannot repeatedly elevate or loop after a failed install.
         if !started_in_lite_mode && status.prompt_on_main_open {
-            // 只有可操作的更新结果才主动通知前端，是为了避免启动后把“正在检查/无更新/无安装包”误弹成手动检查窗口。
-            // Only actionable update results notify the frontend so startup never misopens a manual-check dialog for checking, no-update, or missing-package states.
             let _ = app_for_thread.emit("clipanchor-update-status", status);
         }
     });
@@ -117,9 +129,19 @@ pub fn startup_background_check(app: &AppHandle, paths: &DataPaths, started_in_l
 
 pub fn main_open_check(paths: &DataPaths) -> UpdateStatusPayload {
     let mut status = read_status(paths).unwrap_or_else(|| idle_status("main_open"));
-    if status.prompt_on_main_open && !is_promptable_update(&status) {
-        // 旧状态文件可能来自上一轮手动检查或无安装包发布；读取时清掉提示位，避免每次进入主界面都重复弹窗。
-        // Old status files may come from a previous manual check or a release without packages; clearing the prompt bit prevents repeated dialogs on every main-window entry.
+    if status.prompt_on_main_open {
+        if is_promptable_update(&status) {
+            // 返回给当前主窗口的副本保留提示位，但磁盘状态立即消费该标记，从根源上避免每次激活主窗口都再次弹出同一更新。
+            // The copy returned to the current window keeps the prompt bit, while the persisted state consumes it immediately so every activation cannot reopen the same update.
+            let response = status.clone();
+            status.prompt_on_main_open = false;
+            let _ = save_status(paths, &status);
+            app_log::info(paths, "update", format!("main window consumed one update prompt; status={}", response.status));
+            return response;
+        }
+
+        // 旧状态或无兼容安装包的状态不可提示，清理残留标记可以防止无效弹窗循环。
+        // Stale or package-less states are not promptable; clearing leftover flags prevents an invalid dialog loop.
         status.prompt_on_main_open = false;
         status.attention_required = false;
         let _ = save_status(paths, &status);
@@ -141,13 +163,16 @@ pub fn dismiss_prompt(paths: &DataPaths) -> Result<UpdateStatusPayload, String> 
 }
 
 pub fn manual_check(paths: &DataPaths, source: &str) -> UpdateStatusPayload {
-    // 每次重新检查前清理旧安装包，是为了避免旧版本残留被误认为当前可安装更新。
-    // Old installers are removed before every new check so stale packages cannot be mistaken for the currently selected update.
-    if let Err(error) = clear_update_packages(paths) {
-        app_log::warn(paths, "update", format!("old update package cleanup failed: {}", error));
-    }
-    // 手动检查也放入后台线程，是为了让前端立即显示更新页面，并通过轮询看到检查与下载阶段变化。
-    // Manual checks also run in a background thread so the frontend opens the update page immediately and polls checking/download state changes.
+    let Some(check_guard) = try_begin_update_check() else {
+        // 连续点击检查按钮时返回同一个进行中状态，是为了避免并发请求删除缓存、覆盖状态或重复下载。
+        // Repeated clicks return the same in-flight state so concurrent requests cannot delete cache, overwrite status, or download twice.
+        let existing = read_status(paths).unwrap_or_else(|| checking_status(source));
+        app_log::info(paths, "update", format!("manual update check reused an in-flight task; source={}", source));
+        return existing;
+    };
+
+    // 手动检查放入后台线程，是为了让前端立即显示更新页面，并通过轮询看到检查与下载阶段变化。
+    // Manual checks run in a background thread so the frontend opens immediately and polls checking and download stages.
     let checking = checking_status(source);
     let _ = save_status(paths, &checking);
     app_log::info(paths, "update", format!("manual update check scheduled; source={}", source));
@@ -155,6 +180,7 @@ pub fn manual_check(paths: &DataPaths, source: &str) -> UpdateStatusPayload {
     let paths_for_thread = paths.clone();
     let source_for_thread = source.to_string();
     thread::spawn(move || {
+        let _check_guard = check_guard;
         let status = perform_update_check(&paths_for_thread, &source_for_thread, true, true);
         let _ = save_status(&paths_for_thread, &status);
     });
@@ -163,30 +189,64 @@ pub fn manual_check(paths: &DataPaths, source: &str) -> UpdateStatusPayload {
 }
 
 pub fn install_downloaded_update(app: &AppHandle, paths: &DataPaths) -> Result<UpdateStatusPayload, String> {
-    let mut status = read_status(paths).ok_or_else(|| "No downloaded update is available".to_string())?;
-    let mut quit_after_launch = false;
-    let local_path = status.downloaded_path.clone().unwrap_or_default();
-    if !local_path.trim().is_empty() && Path::new(&local_path).exists() {
-        quit_after_launch = open_installer_path(app, paths, Path::new(&local_path))?;
-    } else if let Some(url) = status.asset_url.clone().filter(|value| !value.trim().is_empty()) {
-        open_external_url(&url)?;
-    } else {
-        return Err("No installer package or release URL is available".into());
+    if UPDATE_INSTALL_HANDOFF_STARTED
+        .compare_exchange(false, true, AtomicOrdering::AcqRel, AtomicOrdering::Acquire)
+        .is_err()
+    {
+        // 安装交接一旦开始，后续双击或重复命令只返回当前状态，是为了绝不启动第二份覆盖脚本或第二次提权请求。
+        // Once installer handoff starts, later double-clicks or repeated commands only reuse the current state so a second replacement script or elevation prompt can never launch.
+        return read_status(paths).ok_or_else(|| "Update installation is already starting".to_string());
     }
 
-    // 覆盖式更新需要由独立安装脚本在本进程退出后执行，是为了避免运行中的二进制锁住自身安装目录。
-    // Replacement updates are handed to a detached installer after this process exits so the running binary does not lock its own install directory.
-    status.status = "installing".into();
+    let result = install_downloaded_update_once(app, paths);
+    match result {
+        Ok((status, quit_after_launch)) => {
+            if quit_after_launch {
+                // 自动覆盖脚本已接管后保持门闩关闭直到进程退出，是为了堵住“脚本已启动但退出事件尚未完成”这一极短的重复点击窗口。
+                // After the replacement helper takes over, the latch stays closed until process exit, covering the brief window between helper launch and final shutdown.
+                app.exit(0);
+            } else {
+                UPDATE_INSTALL_HANDOFF_STARTED.store(false, AtomicOrdering::Release);
+            }
+            Ok(status)
+        }
+        Err(error) => {
+            UPDATE_INSTALL_HANDOFF_STARTED.store(false, AtomicOrdering::Release);
+            Err(error)
+        }
+    }
+}
+
+fn install_downloaded_update_once(app: &AppHandle, paths: &DataPaths) -> Result<(UpdateStatusPayload, bool), String> {
+    let mut status = read_status(paths).ok_or_else(|| "No downloaded update is available".to_string())?;
+    let local_path = status.downloaded_path.clone().unwrap_or_default();
+    let quit_after_launch = if !local_path.trim().is_empty() && Path::new(&local_path).exists() {
+        open_installer_path(app, paths, Path::new(&local_path))?
+    } else if let Some(url) = status.asset_url.clone().filter(|value| !value.trim().is_empty()) {
+        open_external_url(&url)?;
+        false
+    } else {
+        return Err("No installer package or release URL is available".into());
+    };
+
+    // 只有独立覆盖脚本真正接管时才进入 installing；系统包管理器或发布页仅被打开时仍保留可安装状态，避免界面永久卡在忙碌态。
+    // The state becomes installing only after a detached replacement helper takes over; opening a package manager or release page keeps the update installable instead of leaving the UI permanently busy.
+    status.status = if quit_after_launch { "installing".into() } else { "downloaded".into() };
     status.prompt_on_main_open = false;
     status.attention_required = false;
     status.message = Some(installer_handoff_message(quit_after_launch).into());
     status.checked_at = now_string();
-    let _ = save_status(paths, &status);
-    app_log::info(paths, "update", installer_handoff_log_message(quit_after_launch));
-    if quit_after_launch {
-        app.exit(0);
+    if let Err(error) = save_status(paths, &status) {
+        if quit_after_launch {
+            // 覆盖脚本已经独立启动后，即使状态文件暂时写入失败也必须继续退出；此时回滚安装门闩会让用户有机会再次启动第二份安装脚本。
+            // Once the detached replacement helper has launched, a transient status-file failure must not cancel shutdown; releasing the install latch here would let a second helper start.
+            app_log::warn(paths, "update", format!("installer handoff started but status persistence failed: {}", error));
+        } else {
+            return Err(error);
+        }
     }
-    Ok(status)
+    app_log::info(paths, "update", installer_handoff_log_message(quit_after_launch));
+    Ok((status, quit_after_launch))
 }
 
 fn perform_update_check(paths: &DataPaths, source: &str, auto_download: bool, interactive: bool) -> UpdateStatusPayload {
@@ -274,8 +334,10 @@ fn perform_update_check(paths: &DataPaths, source: &str, auto_download: bool, in
             status.status = "update_failed".into();
             status.update_failed = true;
             status.install_ready = false;
-            status.prompt_on_main_open = should_prompt_after_background_check(source, interactive);
-            status.attention_required = should_prompt_after_background_check(source, interactive);
+            // 下载失败保持静默且不留下提示位，是为了避免离线启动时每次打开主界面都重复触发同一失败通知。
+            // Download failures stay silent and leave no prompt bit so offline startup cannot retrigger the same failure notification on every main-window open.
+            status.prompt_on_main_open = false;
+            status.attention_required = false;
             status.message = Some("download_failed".into());
             status
         }
@@ -387,9 +449,7 @@ fn asset_score(asset: &GitHubAsset, platform: &PlatformKind, arch: &str, lang: &
     Some(score)
 }
 
-fn clear_update_packages(paths: &DataPaths) -> Result<(), String> {
-    // 更新目录只保存可重新下载的安装包，因此检查前清空可以避免多个旧版本占用空间并干扰“立即更新”。
-    // The update directory stores only re-downloadable installers, so clearing it before checks prevents old versions from wasting space or confusing Install Now.
+fn prune_update_packages(paths: &DataPaths, keep: &Path) -> Result<(), String> {
     let dir = paths.data.join(UPDATE_DIR);
     if !dir.exists() {
         return Ok(());
@@ -397,28 +457,69 @@ fn clear_update_packages(paths: &DataPaths) -> Result<(), String> {
     for entry in fs::read_dir(&dir).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
         let path = entry.path();
-        if path.is_dir() {
-            fs::remove_dir_all(&path).map_err(|error| error.to_string())?;
-        } else {
+        if path == keep || path.is_dir() {
+            continue;
+        }
+        let extension = path.extension().and_then(|value| value.to_str()).unwrap_or_default().to_lowercase();
+        let is_installer = matches!(extension.as_str(), "exe" | "msi" | "dmg" | "deb" | "rpm");
+        let is_partial = path.file_name().and_then(|value| value.to_str()).map(|name| name.ends_with(".part")).unwrap_or(false);
+        if is_installer || is_partial {
             fs::remove_file(&path).map_err(|error| error.to_string())?;
         }
     }
     Ok(())
 }
 
+fn update_asset_cache_name(asset: &GitHubAsset) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in asset.browser_download_url.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    // GitHub 不同 Release 可能复用同一个安装包文件名；把资产 URL 指纹写入缓存名可防止同名同体积旧包被下一版本误复用。
+    // Different GitHub Releases may reuse one installer filename; adding the asset URL fingerprint prevents an older same-name, same-size package from being reused for a newer release.
+    format!("{:016x}-{}", hash, safe_asset_name(&asset.name))
+}
+
 fn download_asset(paths: &DataPaths, asset: &GitHubAsset) -> Result<PathBuf, String> {
-    // 更新包存入便携 data 目录，是为了保持项目“所有运行数据跟随软件根目录”的设计约束。
-    // Update packages are stored under the portable data directory to preserve the project rule that runtime data stays beside the app.
+    // 缓存按资产 URL 指纹与服务端大小共同验证，是为了复用完整包，同时避免零字节或中断文件被误当成可安装更新。
+    // Cache reuse validates both the asset URL fingerprint and server size so complete packages are reused while empty or interrupted files can never be treated as installable.
     let dir = paths.data.join(UPDATE_DIR);
     fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
-    let target = dir.join(safe_asset_name(&asset.name));
-    if target.exists() && target.metadata().map(|metadata| metadata.len()).unwrap_or(0) > 0 {
+    let target = dir.join(update_asset_cache_name(asset));
+    let cached_size = target.metadata().ok().map(|metadata| metadata.len()).unwrap_or(0);
+    let cache_is_valid = cached_size > 0 && asset.size.map(|expected| expected == cached_size).unwrap_or(true);
+    if cache_is_valid {
+        let _ = prune_update_packages(paths, &target);
         return Ok(target);
     }
-    download_url_to_path(&asset.browser_download_url, &target)?;
-    if !target.exists() || target.metadata().map(|metadata| metadata.len()).unwrap_or(0) == 0 {
+
+    let partial = target.with_file_name(format!(
+        "{}.part",
+        target.file_name().and_then(|value| value.to_str()).unwrap_or("clipanchor-update")
+    ));
+    let _ = fs::remove_file(&partial);
+    download_url_to_path(&asset.browser_download_url, &partial)?;
+
+    let downloaded_size = partial.metadata().map_err(|error| error.to_string())?.len();
+    if downloaded_size == 0 {
+        let _ = fs::remove_file(&partial);
         return Err("Downloaded package is empty".into());
     }
+    if let Some(expected_size) = asset.size {
+        if downloaded_size != expected_size {
+            let _ = fs::remove_file(&partial);
+            return Err(format!("Downloaded package size mismatch: expected {}, got {}", expected_size, downloaded_size));
+        }
+    }
+
+    if target.exists() {
+        fs::remove_file(&target).map_err(|error| error.to_string())?;
+    }
+    // 先下载到临时文件再同目录重命名，是为了让状态文件永远不会引用只写了一半的安装包。
+    // Downloading to a sibling temporary file before rename ensures the status file never points at a half-written installer.
+    fs::rename(&partial, &target).map_err(|error| error.to_string())?;
+    prune_update_packages(paths, &target)?;
     Ok(target)
 }
 
@@ -542,11 +643,6 @@ fn open_installer_path(app: &AppHandle, paths: &DataPaths, path: &Path) -> Resul
     {
         let _ = app;
     }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
-        let _ = paths;
-    }
-
     #[cfg(target_os = "windows")]
     {
         install_windows_package_update(paths, path)?;
@@ -566,11 +662,113 @@ fn open_installer_path(app: &AppHandle, paths: &DataPaths, path: &Path) -> Resul
 
     #[cfg(target_os = "linux")]
     {
-        Command::new("xdg-open").arg(path).spawn().map_err(|error| error.to_string())?;
-        return Ok(false);
+        if command_status("/bin/sh", &["-c", "command -v pkexec >/dev/null 2>&1"]).is_err() {
+            // 缺少图形提权代理时退回系统包管理器界面，是为了不在无 pkexec 的桌面环境中直接退出应用并留下未安装状态。
+            // When no graphical privilege agent is available, falling back to the system package UI avoids quitting the app with an update that was never installed.
+            Command::new("xdg-open").arg(path).spawn().map_err(|error| error.to_string())?;
+            return Ok(false);
+        }
+        install_linux_package_update(paths, path)?;
+        return Ok(true);
     }
 }
 
+#[cfg(target_os = "linux")]
+fn install_linux_package_update(paths: &DataPaths, installer_path: &Path) -> Result<(), String> {
+    let extension = installer_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_lowercase();
+    if !matches!(extension.as_str(), "deb" | "rpm") {
+        return Err("Linux update package must be a DEB or RPM installer".into());
+    }
+
+    let installer_path = installer_path.canonicalize().unwrap_or_else(|_| installer_path.to_path_buf());
+    let update_dir = paths.data.join(UPDATE_DIR);
+    fs::create_dir_all(&update_dir).map_err(|error| error.to_string())?;
+    let script_path = update_dir.join("apply_linux_update.sh");
+    let log_path = paths.logs.join("linux-update.log");
+    let current_exe = std::env::current_exe().map_err(|error| error.to_string())?;
+
+    fs::write(
+        &script_path,
+        linux_installer_script(&installer_path, &current_exe, &log_path, std::process::id(), &extension),
+    )
+    .map_err(|error| error.to_string())?;
+    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755)).map_err(|error| error.to_string())?;
+
+    // 提权只包围包管理命令，外层脚本仍以当前桌面用户运行，是为了安装后重启的软件不会意外以 root 身份创建数据文件。
+    // Privilege elevation wraps only the package-manager command while the outer script stays under the desktop user, preventing the restarted app from creating root-owned data files.
+    let mut command = Command::new("/usr/bin/nohup");
+    command
+        .arg("/bin/sh")
+        .arg(&script_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    command.spawn().map(|_| ()).map_err(|error| error.to_string())
+}
+
+#[cfg(target_os = "linux")]
+fn linux_installer_script(installer_path: &Path, current_exe: &Path, log_path: &Path, app_pid: u32, package_kind: &str) -> String {
+    format!(
+        r###"#!/bin/sh
+set -u
+PACKAGE_PATH={package}
+CURRENT_EXE={current_exe}
+LOG_FILE={log}
+APP_PID={pid}
+PACKAGE_KIND={kind}
+
+log() {{
+  mkdir -p "$(dirname "$LOG_FILE")" >/dev/null 2>&1 || true
+  printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "$LOG_FILE" 2>/dev/null || true
+}}
+
+log "waiting for ClipAnchor to quit"
+WAIT_INDEX=0
+while kill -0 "$APP_PID" >/dev/null 2>&1; do
+  WAIT_INDEX=$((WAIT_INDEX + 1))
+  if [ "$WAIT_INDEX" -gt 180 ]; then
+    log "ClipAnchor process did not exit in time"
+    exit 1
+  fi
+  sleep 0.25
+done
+
+if [ "$PACKAGE_KIND" = "deb" ]; then
+  log "installing DEB package"
+  pkexec /usr/bin/dpkg -i "$PACKAGE_PATH" >> "$LOG_FILE" 2>&1 || exit 1
+else
+  RPM_BIN="$(command -v rpm 2>/dev/null || true)"
+  if [ -z "$RPM_BIN" ]; then
+    log "rpm command was not found"
+    exit 1
+  fi
+  log "installing RPM package"
+  pkexec "$RPM_BIN" -U --replacepkgs "$PACKAGE_PATH" >> "$LOG_FILE" 2>&1 || exit 1
+fi
+
+sleep 1
+if [ -x "$CURRENT_EXE" ]; then
+  log "restarting updated application from previous executable path"
+  /usr/bin/nohup "$CURRENT_EXE" >/dev/null 2>&1 &
+elif command -v clipanchor >/dev/null 2>&1; then
+  log "restarting updated application from PATH"
+  /usr/bin/nohup "$(command -v clipanchor)" >/dev/null 2>&1 &
+else
+  log "update installed but application executable could not be located"
+  exit 1
+fi
+"###,
+        package = shell_quote(&installer_path.to_string_lossy()),
+        current_exe = shell_quote(&current_exe.to_string_lossy()),
+        log = shell_quote(&log_path.to_string_lossy()),
+        pid = app_pid,
+        kind = shell_quote(package_kind),
+    )
+}
 
 #[cfg(target_os = "windows")]
 fn install_windows_package_update(paths: &DataPaths, installer_path: &Path) -> Result<(), String> {
@@ -715,8 +913,8 @@ fn installer_handoff_message(quit_after_launch: bool) -> &'static str {
         return "installer_opened";
     }
 
-    // 平台分支拆到独立函数里，是为了让 Windows/macOS 编译器只看到当前平台的返回路径，避免 cfg 内提前 return 导致的 unreachable_code 警告。
-    // Platform branches live in separate functions so each compiler target only sees its own return path, avoiding unreachable_code warnings caused by cfg-gated early returns.
+    // 平台分支拆到独立函数里，是为了让各平台编译器只看到当前目标的返回路径，避免 cfg 内提前 return 导致的不可达代码警告。
+    // Platform branches live in separate functions so each compiler target sees only its own return path, avoiding unreachable-code warnings from cfg-gated early returns.
     platform_auto_install_started_message()
 }
 
@@ -730,9 +928,9 @@ fn platform_auto_install_started_message() -> &'static str {
     "macos_dmg_auto_install_started"
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+#[cfg(target_os = "linux")]
 fn platform_auto_install_started_message() -> &'static str {
-    "installer_opened"
+    "linux_auto_install_started"
 }
 
 fn installer_handoff_log_message(quit_after_launch: bool) -> &'static str {
@@ -740,8 +938,8 @@ fn installer_handoff_log_message(quit_after_launch: bool) -> &'static str {
         return "installer opened for downloaded update";
     }
 
-    // 日志文案同样按平台函数隔离，是为了保持构建输出干净，同时不改变 Windows/macOS 自动安装流程。
-    // Log text is isolated the same way to keep build output clean without changing the Windows/macOS auto-install behavior.
+    // 日志文案同样按平台函数隔离，是为了保持构建输出干净，同时不改变各平台自动安装流程。
+    // Log text is isolated the same way to keep build output clean without changing each platform's automatic installation flow.
     platform_auto_install_log_message()
 }
 
@@ -755,9 +953,9 @@ fn platform_auto_install_log_message() -> &'static str {
     "macOS DMG auto installer launched"
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+#[cfg(target_os = "linux")]
 fn platform_auto_install_log_message() -> &'static str {
-    "installer opened for downloaded update"
+    "Linux package auto installer launched"
 }
 
 #[cfg(target_os = "macos")]
@@ -948,7 +1146,7 @@ fi
     )
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn shell_quote(value: &str) -> String {
     let escaped = value.replace('\'', "'\\''");
     format!("'{}'", escaped)
@@ -1212,14 +1410,32 @@ fn now_string() -> String {
 }
 
 fn read_status(paths: &DataPaths) -> Option<UpdateStatusPayload> {
+    let _guard = UPDATE_STATUS_LOCK.lock().ok()?;
     let text = fs::read_to_string(status_path(paths)).ok()?;
     serde_json::from_str(&text).ok()
 }
 
 fn save_status(paths: &DataPaths, status: &UpdateStatusPayload) -> Result<(), String> {
+    let _guard = UPDATE_STATUS_LOCK.lock().map_err(|_| "Update status lock is poisoned".to_string())?;
     fs::create_dir_all(&paths.data).map_err(|error| error.to_string())?;
     let text = serde_json::to_string_pretty(status).map_err(|error| error.to_string())?;
-    fs::write(status_path(paths), text).map_err(|error| error.to_string())
+    let target = status_path(paths);
+    let temporary = target.with_extension("json.tmp");
+    // 状态先完整写入临时文件再替换，是为了让轮询线程永远读到完整 JSON，而不是并发写入中的半截内容。
+    // Status is fully written to a temporary file before replacement so polling threads always read complete JSON instead of a concurrent partial write.
+    fs::write(&temporary, text).map_err(|error| error.to_string())?;
+    match fs::rename(&temporary, &target) {
+        Ok(()) => Ok(()),
+        Err(first_error) => {
+            if target.exists() {
+                fs::remove_file(&target).map_err(|error| error.to_string())?;
+                fs::rename(&temporary, &target).map_err(|error| error.to_string())
+            } else {
+                let _ = fs::remove_file(&temporary);
+                Err(first_error.to_string())
+            }
+        }
+    }
 }
 
 fn status_path(paths: &DataPaths) -> PathBuf {

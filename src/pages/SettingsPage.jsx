@@ -304,6 +304,16 @@ const shortcutOrder = [
   'toggle_theme_mode'
 ];
 
+function shortcutConflictMessage(conflict, t) {
+  if (!conflict) return '';
+  if (conflict.kind === 'duplicate') return t('shortcutConflictDuplicate');
+  if (conflict.kind === 'invalid') return t('shortcutConflictInvalid');
+  if (conflict.kind === 'system') {
+    return t('shortcutConflictSystem').replace('{source}', conflict.source || t('shortcutConflictUnknownSource'));
+  }
+  return '';
+}
+
 function normalizeSettings(value) {
   const provider = normalizeTranslationProvider(value?.translation_api_provider, value?.translation_api_url);
   const storedKeys = { ...(value?.translation_api_keys || {}) };
@@ -454,6 +464,8 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
   const [languageCodeDraft, setLanguageCodeDraft] = useState('');
   const [translationApiKeyDraft, setTranslationApiKeyDraft] = useState(() => String(settings.translation_api_key || ''));
   const [languageGenerationState, setLanguageGenerationState] = useState({ busy: false, message: '', error: false, current: 0, total: 0, percent: 0 });
+  const [languageReloadState, setLanguageReloadState] = useState({ busy: false, message: '', error: false });
+  const [shortcutConflictResults, setShortcutConflictResults] = useState([]);
 
   useEffect(() => {
     // 设置页存在本地编辑态；当快捷键从后端改变服务开关时，需要用最新 boot 设置覆盖本地态。
@@ -468,10 +480,50 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
     api.getLogStatus().then(setLogStatus).catch(() => setLogStatus(null));
   }, [boot.paths.data]);
 
-  const conflicts = useMemo(() => {
+  const globalShortcutsSupported = boot.capabilities?.global_shortcuts_supported !== false;
+
+  const duplicateConflicts = useMemo(() => {
+    if (!globalShortcutsSupported) return new Set();
     const values = Object.values(settings.shortcuts || {}).map(normalizeShortcutForStorage);
     return new Set(values.filter((value, index) => values.indexOf(value) !== index));
-  }, [settings.shortcuts]);
+  }, [globalShortcutsSupported, settings.shortcuts]);
+
+  useEffect(() => {
+    let disposed = false;
+    setShortcutConflictResults([]);
+    if (!globalShortcutsSupported) return undefined;
+    const timer = window.setTimeout(async () => {
+      try {
+        const results = await api.checkShortcutConflicts({ ...defaultShortcuts, ...(settings.shortcuts || {}) });
+        if (!disposed) setShortcutConflictResults(Array.isArray(results) ? results : []);
+      } catch (error) {
+        // 冲突检测失败不应阻断设置编辑；后端会记录平台诊断，界面只保留可即时判断的应用内重复提示。
+        // Conflict probing must not block editing; the backend records platform diagnostics while the UI keeps the immediately knowable in-app duplicate warning.
+        if (!disposed) setShortcutConflictResults([]);
+      }
+    }, 240);
+    return () => {
+      disposed = true;
+      window.clearTimeout(timer);
+    };
+  }, [globalShortcutsSupported, settings.shortcuts]);
+
+  const shortcutWarnings = useMemo(() => {
+    const warnings = new Map();
+    if (!globalShortcutsSupported) return warnings;
+    for (const key of shortcutOrder) {
+      const value = settings.shortcuts?.[key] || defaultShortcuts[key];
+      const normalized = normalizeShortcutForStorage(value);
+      if (duplicateConflicts.has(normalized)) {
+        warnings.set(key, { kind: 'duplicate', source: 'ClipAnchor' });
+      }
+    }
+    for (const conflict of shortcutConflictResults) {
+      if (!conflict?.shortcut_key || warnings.has(conflict.shortcut_key)) continue;
+      warnings.set(conflict.shortcut_key, conflict);
+    }
+    return warnings;
+  }, [duplicateConflicts, globalShortcutsSupported, settings.shortcuts, shortcutConflictResults]);
 
   const languageChoices = useMemo(() => listLanguageChoices(languagePacks), [languagePacks]);
   const coreLanguageOptions = useMemo(() => ([
@@ -483,6 +535,7 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
   const activeTranslationProvider = getTranslationProvider(settings.translation_api_provider, settings.translation_api_url);
   const referenceLanguageMessages = useMemo(() => getReferenceMessages('en'), []);
   const languagePackFolderPath = boot.paths.locales || `${boot.paths.data}/locales`;
+  const popupPositionSupported = boot.capabilities?.popup_position_supported !== false;
 
   useEffect(() => {
     let disposed = false;
@@ -515,13 +568,24 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
   }, [boot.paths.locales, referenceLanguageMessages, onLanguagePacksChange]);
 
   async function persist(next) {
+    const previous = normalizeSettings(settings);
     const normalized = normalizeSettings(next);
+    // 语言与主题先同步到父级状态，可让 React 立即重建翻译器和主题类；若后端拒绝保存，再统一回滚，避免 Linux 上出现“按钮已选中但界面不变化”。
+    // Locale and theme are applied to parent state immediately so React can rebuild the translator and theme class; a backend rejection rolls everything back instead of leaving Linux controls selected without visual change.
     setSettings(normalized);
-    const saved = await api.saveSettings(normalized);
-    const normalizedSaved = normalizeSettings(saved);
-    setSettings(normalizedSaved);
-    onBootChange({ ...boot, settings: normalizedSaved });
-    return normalizedSaved;
+    onBootChange({ ...boot, settings: normalized });
+    try {
+      const saved = await api.saveSettings(normalized);
+      const normalizedSaved = normalizeSettings(saved);
+      setSettings(normalizedSaved);
+      onBootChange({ ...boot, settings: normalizedSaved });
+      return normalizedSaved;
+    } catch (error) {
+      setSettings(previous);
+      onBootChange({ ...boot, settings: previous });
+      console.error('ClipAnchor settings save failed:', error);
+      throw error;
+    }
   }
 
   async function toggleService(name, enabled) {
@@ -558,9 +622,15 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
     // 切换语言前后都写入轻量日志，是为了让“语言包是否被激活”可排查，同时不记录任何实际界面文案。
     // Lightweight logs are written before and after locale switching so activation can be diagnosed without storing any UI copy.
     await api.logLanguagePackEvent('activate_requested', normalized, provider, true, 'settings-ui').catch(() => {});
-    const saved = await update({ locale: normalized });
-    await api.logLanguagePackEvent('activate_saved', saved.locale, provider, true, 'settings-ui').catch(() => {});
-    return saved;
+    try {
+      const saved = await update({ locale: normalized });
+      await api.logLanguagePackEvent('activate_saved', saved.locale, provider, true, 'settings-ui').catch(() => {});
+      return saved;
+    } catch (error) {
+      await api.logLanguagePackEvent('activate_failed', normalized, provider, false, String(error)).catch(() => {});
+      showSettingsAlert(t('language'), String(error));
+      return null;
+    }
   }
 
   async function saveTranslationProvider(providerId) {
@@ -730,17 +800,45 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
     }, true);
   }
 
-  async function refreshLanguagePacks() {
+  async function refreshLanguagePacks({ throwOnError = false } = {}) {
     await api.logLanguagePackEvent('scan_requested', '', 'local-pack-store', true, 'settings-ui').catch(() => {});
-    const packs = await api.listLanguagePacks(referenceLanguageMessages).catch((error) => {
-      api.logLanguagePackEvent('scan_failed', '', 'local-pack-store', false, String(error?.message || error)).catch(() => {});
-      return [];
-    });
-    const normalized = Array.isArray(packs) ? packs : [];
-    const warningCount = normalized.filter((pack) => pack.integrity && pack.integrity !== 'complete').length;
-    await api.logLanguagePackEvent('scan_finished', '', 'local-pack-store', true, `${normalized.length} pack(s), ${warningCount} warning(s)`).catch(() => {});
-    onLanguagePacksChange(normalized);
-    return normalized;
+    try {
+      const packs = await api.listLanguagePacks(referenceLanguageMessages);
+      const normalized = Array.isArray(packs) ? packs : [];
+      const warningCount = normalized.filter((pack) => pack.integrity && pack.integrity !== 'complete').length;
+      await api.logLanguagePackEvent('scan_finished', '', 'local-pack-store', true, `${normalized.length} pack(s), ${warningCount} warning(s)`).catch(() => {});
+      onLanguagePacksChange(normalized);
+      return normalized;
+    } catch (error) {
+      const detail = String(error?.message || error);
+      await api.logLanguagePackEvent('scan_failed', '', 'local-pack-store', false, detail).catch(() => {});
+      if (throwOnError) throw error;
+      // 自动刷新失败时保留已经加载的选项，是为了避免一次临时文件锁或目录读取错误把整个扩展语言列表清空。
+      // Automatic refresh keeps the already loaded options after a transient file-lock or directory-read failure instead of clearing the entire extension language list.
+      return languagePacks;
+    }
+  }
+
+  async function reloadLanguagePacks() {
+    if (languageReloadState.busy || languageGenerationState.busy) return;
+    setLanguageReloadState({ busy: true, message: t('reloadingLanguagePacks'), error: false });
+    try {
+      // 手动刷新直接重新扫描后端活动目录，是为了让用户复制 JSON 后无需重启即可看到并选择新的扩展语言。
+      // Manual reload rescans the backend's active directory so a newly copied JSON file becomes selectable without restarting the application.
+      const packs = await refreshLanguagePacks({ throwOnError: true });
+      setLanguageReloadState({
+        busy: false,
+        message: t('reloadLanguagePacksDone').replace('{count}', String(packs.length)),
+        error: false
+      });
+    } catch (error) {
+      const detail = String(error?.message || error);
+      setLanguageReloadState({
+        busy: false,
+        message: t('reloadLanguagePacksFailed').replace('{error}', detail),
+        error: true
+      });
+    }
   }
 
   function preservePlaceholders(text) {
@@ -1031,7 +1129,7 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
           <div className="appearance-controls">
             <div className="appearance-basic-grid">
               <div className="control-row language-control-row appearance-language-card"><SettingName help={t('helpLanguage')}>{t('language')}</SettingName><Segmented className="language-segmented" value={['auto', 'en', 'zh'].includes(settings.locale) ? settings.locale : ''} onChange={chooseLocale} options={coreLanguageOptions} /></div>
-              <label className="control-row appearance-theme-card"><SettingName help={t('helpTheme')}>{t('theme')}</SettingName><Segmented value={settings.theme} onChange={(v) => update({ theme: v })} options={[{ value: 'system', label: t('system') }, { value: 'dark', label: t('dark') }, { value: 'light', label: t('light') }]} /></label>
+              <label className="control-row appearance-theme-card"><SettingName help={t('helpTheme')}>{t('theme')}</SettingName><Segmented value={settings.theme} onChange={(v) => update({ theme: v }).catch((error) => showSettingsAlert(t('theme'), String(error)))} options={[{ value: 'system', label: t('system') }, { value: 'dark', label: t('dark') }, { value: 'light', label: t('light') }]} /></label>
               <label className="control-row appearance-animation-card"><SettingName help={t('helpAnimation')}>{t('animation')}</SettingName><Segmented value={settings.animation_mode} onChange={(v) => update({ animation_mode: v })} options={[{ value: 'elegant', label: t('elegant') }, { value: 'performance', label: t('performance') }]} /></label>
             </div>
             <div className="language-extension-panel">
@@ -1041,7 +1139,7 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
               </div>
               <p className="language-pack-warning">{t('languagePackUnofficialUserNotice')}</p>
               {extraLanguageOptions.length ? (
-                <div className="language-pack-grid">
+                <div className="language-pack-grid" role="radiogroup" aria-label={t('languagePackOther')}>
                   {/* 扩展语言卡片把名称、代号和切换状态拆成独立层级，是为了避免操作按钮挤压主要信息。 */}
                   {/* Extra-language cards separate the name, code, and switch state so action buttons cannot compress the primary information. */}
                   {extraLanguageOptions.map((language) => {
@@ -1052,7 +1150,7 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
                     const updateAvailable = ['incomplete', 'update_available'].includes(integrity);
                     return (
                       <div key={language.code} className={`language-pack-option ${active ? 'active' : ''} ${unavailable ? 'has-warning' : ''} ${updateAvailable ? 'has-update' : ''}`}>
-                        <button type="button" className="language-pack-select" aria-pressed={active} title={displayName} onClick={() => chooseExtraLanguage(language)}>
+                        <button type="button" className="language-pack-select" role="radio" aria-checked={active} title={displayName} onClick={() => chooseExtraLanguage(language)}>
                           <span className="language-pack-check" aria-hidden="true" />
                           <span className="language-pack-main">
                             <span className="language-pack-title-row">
@@ -1089,14 +1187,14 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
                   <strong>{t('languageGeneratorTitle')}</strong>
                   <p>{t('languageGeneratorHint')}</p>
                 </div>
-                <section className="translation-service-panel-v057" aria-label={t('translationApiSettingsTitle')}>
-                  <div className="translation-service-panel-v057__heading">
+                <section className="translation-service-panel" aria-label={t('translationApiSettingsTitle')}>
+                  <div className="translation-service-panel__heading">
                     <strong>{t('translationApiSettingsTitle')}</strong>
                     <small>{t('translationApiSettingsHint')}</small>
                   </div>
-                  <div className="translation-service-panel-v057__controls">
-                    <div className="translation-service-panel-v057__field translation-service-panel-v057__provider">
-                      <span className="translation-service-panel-v057__label">{t('translationProviderField')}</span>
+                  <div className="translation-service-panel__controls">
+                    <div className="translation-service-panel__field translation-service-panel__provider">
+                      <span className="translation-service-panel__label">{t('translationProviderField')}</span>
                       <DropdownSelect
                         value={normalizeTranslationProvider(settings.translation_api_provider, settings.translation_api_url)}
                         disabled={languageGenerationState.busy}
@@ -1108,9 +1206,9 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
                         ]}
                       />
                     </div>
-                    <div className="translation-service-panel-v057__field translation-service-panel-v057__key">
-                      <span className="translation-service-panel-v057__label">{t('translationApiKeyField')}</span>
-                      <div className="translation-service-panel-v057__key-row">
+                    <div className="translation-service-panel__field translation-service-panel__key">
+                      <span className="translation-service-panel__label">{t('translationApiKeyField')}</span>
+                      <div className="translation-service-panel__key-row">
                         <input
                           type="password"
                           aria-label={t('translationApiKeyField')}
@@ -1172,7 +1270,23 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
                   </label>
                   <div className="language-folder-actions">
                     <button className="soft-button open-language-folder-button" type="button" onClick={openLanguagePackFolder}><FolderOpen size={15} /> {t('openLanguagePackFolder')}</button>
+                    <button
+                      className="soft-button reload-language-folder-button"
+                      type="button"
+                      disabled={languageReloadState.busy || languageGenerationState.busy}
+                      title={t('reloadLanguagePacks')}
+                      aria-label={t('reloadLanguagePacks')}
+                      onClick={reloadLanguagePacks}
+                    >
+                      <RefreshCw className={languageReloadState.busy ? 'is-spinning' : ''} size={15} />
+                      {languageReloadState.busy ? t('reloadingLanguagePacks') : t('reloadLanguagePacks')}
+                    </button>
                   </div>
+                  {languageReloadState.message ? (
+                    <p className={`language-reload-status ${languageReloadState.error ? 'error' : ''}`} role="status">
+                      {languageReloadState.message}
+                    </p>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -1189,40 +1303,67 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
           </div>
         </div>
 
-        <div className="settings-card wide shortcut-card">
-          <h2><Keyboard size={18} /> {t('shortcuts')}</h2>
-          <div className="shortcut-grid">
-            {shortcutOrder.map((key) => {
-              const value = settings.shortcuts?.[key] || defaultShortcuts[key];
-              const normalizedValue = normalizeShortcutForStorage(value);
-              return (
-                <label key={key}>
-                  <SettingName>{t(shortcutLabels[key] || key)}</SettingName>
-                  <input className={conflicts.has(normalizedValue) ? 'conflict' : ''} value={formatShortcutForDisplay(value)} onKeyDown={(e) => captureShortcut(e, (v) => updateShortcuts(key, v))} onChange={() => {}} />
+        {globalShortcutsSupported ? (
+          <div className="settings-card wide shortcut-card">
+            <h2><Keyboard size={18} /> {t('shortcuts')}</h2>
+            <div className="shortcut-grid">
+              {shortcutOrder.map((key) => {
+                const value = settings.shortcuts?.[key] || defaultShortcuts[key];
+                const warning = shortcutWarnings.get(key);
+                const warningMessage = shortcutConflictMessage(warning, t);
+                return (
+                  <label key={key}>
+                    <SettingName>{t(shortcutLabels[key] || key)}</SettingName>
+                    <span className={`shortcut-input-shell ${warning ? 'has-warning' : ''}`}>
+                      <input
+                        className={warning ? 'conflict' : ''}
+                        value={formatShortcutForDisplay(value)}
+                        onKeyDown={(event) => captureShortcut(event, (nextValue) => updateShortcuts(key, nextValue))}
+                        onChange={() => {}}
+                        aria-invalid={warning ? 'true' : 'false'}
+                        aria-describedby={warning ? `shortcut-warning-${key}` : undefined}
+                      />
+                      {warning ? (
+                        <span
+                          id={`shortcut-warning-${key}`}
+                          className="shortcut-conflict-indicator"
+                          role="status"
+                          tabIndex="0"
+                          aria-label={warningMessage}
+                          data-tooltip={warningMessage}
+                        >
+                          <TriangleAlert size={15} />
+                          <span className="visually-hidden">{warningMessage}</span>
+                        </span>
+                      ) : null}
+                    </span>
+                  </label>
+                );
+              })}
+              {isMac ? (
+                <label className="builtin-shortcut-row">
+                  <SettingName help={t('helpShortcutCommandW')}>{t('shortcutCommandW')}</SettingName>
+                  <input readOnly value="Command+W" />
                 </label>
-              );
-            })}
-            {isMac ? (
-              <label className="builtin-shortcut-row">
-                <SettingName help={t('helpShortcutCommandW')}>{t('shortcutCommandW')}</SettingName>
-                <input readOnly value="Command+W" />
-              </label>
-            ) : null}
+              ) : null}
+            </div>
           </div>
-        </div>
+        ) : null}
 
-        <div className="settings-card wide position-card">
-          <h2><MapPinned size={18} /> {t('position')} <HelpTip text={t('helpPosition')} /></h2>
-          <PositionMap
-            settings={settings}
-            t={t}
-            onSave={(x, y) => {
-              const next = { ...settings, popup_x: x, popup_y: y };
-              setSettings(next);
-              onBootChange({ ...boot, settings: next });
-            }}
-          />
-        </div>
+        {popupPositionSupported ? (
+          <div className="settings-card wide position-card">
+            <h2><MapPinned size={18} /> {t('position')} <HelpTip text={t('helpPosition')} /></h2>
+            <PositionMap
+              settings={settings}
+              t={t}
+              onSave={(x, y) => {
+                const next = { ...settings, popup_x: x, popup_y: y };
+                setSettings(next);
+                onBootChange({ ...boot, settings: next });
+              }}
+            />
+          </div>
+        ) : null}
 
         <div className="settings-card wide data-card full-data-card">
           <h2><Database size={18} /> {t('data')}</h2>

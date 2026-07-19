@@ -1,15 +1,18 @@
 import net from 'node:net';
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, readdir, stat, utimes, writeFile } from 'node:fs/promises';
+import { join, relative } from 'node:path';
+import { resolveNodeBinary } from './node-tool.mjs';
+import { ensureCargoLock, ensureRustToolchain } from './toolchain.mjs';
 
 const host = '127.0.0.1';
 const preferredPort = 1420;
 const scanLimit = 160;
 const startupTimeoutMs = 30_000;
 const isWindows = process.platform === 'win32';
-const npmExecPath = process.env.npm_execpath?.trim();
-const npmCommand = npmExecPath ? process.execPath : (isWindows ? 'npm.cmd' : 'npm');
-const npmPrefixArgs = npmExecPath ? [npmExecPath] : [];
-const npmNeedsShell = isWindows && !npmExecPath;
+const viteEntry = resolveNodeBinary('vite', 'vite');
+const tauriEntry = resolveNodeBinary('@tauri-apps/cli', 'tauri');
 let viteProcess = null;
 let tauriProcess = null;
 let shuttingDown = false;
@@ -33,8 +36,8 @@ async function chooseDevPort() {
     if (selected) return selected;
   }
 
-  // 固定范围全部被占用或被 Windows 保留时回退到系统分配端口，是为了避免 EACCES 直接终止整个 Tauri 开发流程。
-  // Falling back to an OS-assigned port when the preferred range is occupied or reserved prevents EACCES from terminating the whole Tauri development flow.
+  // 固定范围被占用或被系统保留时回退到动态端口，是为了让开发启动不因单个端口权限问题失败。
+  // Falling back to an OS-assigned port when the preferred range is occupied or reserved prevents one port permission issue from aborting development startup.
   const selected = await tryListen(0);
   if (selected) return selected;
   throw new Error('Unable to find an available local port for the Vite development server.');
@@ -56,11 +59,8 @@ function waitForServer(port) {
       });
       const retry = () => {
         socket.destroy();
-        if (Date.now() >= deadline) {
-          reject(new Error(`Timed out while waiting for Vite on ${host}:${port}.`));
-        } else {
-          setTimeout(attempt, 120);
-        }
+        if (Date.now() >= deadline) reject(new Error(`Timed out while waiting for Vite on ${host}:${port}.`));
+        else setTimeout(attempt, 120);
       };
       socket.once('error', retry);
       socket.once('timeout', retry);
@@ -72,8 +72,8 @@ function waitForServer(port) {
 function stopProcessTree(child) {
   if (!child || child.exitCode !== null || child.killed) return;
   if (isWindows) {
-    // npm 在 Windows 上会再创建一层 cmd.exe，按进程树终止才能避免退出 Tauri 后遗留占用端口的 Vite 子进程。
-    // npm creates an extra cmd.exe layer on Windows, so terminating the process tree prevents a Vite child from keeping the port after Tauri exits.
+    // Windows 子工具可能继续派生进程，按进程树结束可避免 Tauri 退出后 Vite 仍占用开发端口。
+    // Windows tools may spawn descendants, so terminating the process tree prevents Vite from keeping the development port after Tauri exits.
     spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
   } else {
     child.kill('SIGTERM');
@@ -88,26 +88,81 @@ function shutdown(exitCode = 0) {
   process.exit(exitCode);
 }
 
-async function main() {
-  const port = await chooseDevPort();
-  const devUrl = `http://${host}:${port}`;
-  if (port !== preferredPort) {
-    console.log(`Port ${preferredPort} is unavailable or reserved; using ${port} instead.`);
+async function collectRustSources(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...await collectRustSources(path));
+    else if (entry.isFile() && entry.name.endsWith('.rs')) files.push(path);
+  }
+  return files.sort();
+}
+
+async function ensureRustSourcesTriggerRebuild() {
+  const sourceRoot = join(process.cwd(), 'src-tauri', 'src');
+  const markerDirectory = join(process.cwd(), 'src-tauri', 'target');
+  const markerPath = join(markerDirectory, '.clipanchor-rust-source-hash');
+  const sources = await collectRustSources(sourceRoot);
+  const digest = createHash('sha256');
+
+  for (const source of sources) {
+    digest.update(relative(sourceRoot, source));
+    digest.update('\0');
+    digest.update(await readFile(source));
+    digest.update('\0');
   }
 
-  viteProcess = spawn(
-    npmCommand,
-    [...npmPrefixArgs, 'run', 'dev', '--', '--host', host, '--port', String(port), '--strictPort'],
-    {
-      stdio: 'inherit',
-      // npm 脚本自身提供的 npm_execpath 由 Node 直接执行，是为了绕开 Windows 对 npm.cmd 与 JSON 参数的二次命令行解析。
-      // Executing npm's own npm_execpath through Node avoids Windows re-parsing npm.cmd and JSON arguments through a second command shell.
-      shell: npmNeedsShell,
-      windowsHide: true,
-      env: { ...process.env, CLIPANCHOR_DEV_PORT: String(port) }
-    }
-  );
+  const currentHash = digest.digest('hex');
+  const previousHash = await readFile(markerPath, 'utf8').catch(() => '');
+  if (previousHash.trim() === currentHash) return;
 
+  const targetExists = await stat(markerDirectory).then(() => true).catch(() => false);
+  if (!targetExists && !previousHash.trim()) {
+    // 完整清理后 Cargo 本就会重新编译；只写入内容标记而不额外刷新时间或打印提示，可让首次 npm run 输出保持聚焦。
+    // Cargo already rebuilds after a full clean; writing only the content marker avoids redundant timestamp changes and keeps first-run npm output focused.
+    await mkdir(markerDirectory, { recursive: true });
+    await writeFile(markerPath, `${currentHash}\n`, 'utf8');
+    return;
+  }
+
+  // 覆盖压缩包可能保留早于现有 target 产物的文件时间；内容哈希变化时刷新 Rust 源文件时间，确保 Cargo 不会误用旧后端。
+  // An overwritten archive can preserve timestamps older than the existing target artifacts; refreshing Rust source times when the content hash changes prevents Cargo from reusing a stale backend.
+  const now = new Date();
+  await Promise.all(sources.map(async (source) => {
+    const metadata = await stat(source);
+    await utimes(source, metadata.atime, now);
+  }));
+  await mkdir(markerDirectory, { recursive: true });
+  await writeFile(markerPath, `${currentHash}\n`, 'utf8');
+  console.log('Rust source content changed; backend rebuild has been forced.');
+}
+
+async function main() {
+  const forwardedArgs = process.argv.slice(2);
+  if (forwardedArgs.some((argument) => ['--help', '-h', '--version', '-V'].includes(argument))) {
+    // 帮助和 CLI 版本查询不需要启动前端或 Rust 编译器，直接交给 Tauri 可避免无意义的 Vite 输出与端口占用。
+    // Help and CLI version queries need neither the frontend nor the Rust compiler; delegating directly to Tauri avoids irrelevant Vite output and port usage.
+    const result = spawnSync(process.execPath, [tauriEntry, 'dev', ...forwardedArgs], {
+      stdio: 'inherit',
+      windowsHide: true
+    });
+    if (result.error) throw new Error(`Failed to start the Tauri CLI: ${result.error.message}`);
+    process.exit(result.status ?? 1);
+  }
+
+  ensureRustToolchain();
+  ensureCargoLock();
+  await ensureRustSourcesTriggerRebuild();
+  const port = await chooseDevPort();
+  const devUrl = `http://${host}:${port}`;
+  if (port !== preferredPort) console.log(`Port ${preferredPort} is unavailable or reserved; using ${port} instead.`);
+
+  viteProcess = spawn(process.execPath, [viteEntry, '--host', host, '--port', String(port), '--strictPort'], {
+    stdio: 'inherit',
+    windowsHide: true,
+    env: { ...process.env, CLIPANCHOR_DEV_PORT: String(port) }
+  });
   viteProcess.once('error', (error) => {
     console.error(`Failed to start Vite: ${error.message}`);
     shutdown(1);
@@ -115,30 +170,19 @@ async function main() {
 
   await waitForServer(port);
 
-  const userArgs = process.argv.slice(2);
-  const tauriArgs = [...npmPrefixArgs, 'run', 'tauri', '--', 'dev', ...userArgs];
+  const tauriArgs = [tauriEntry, 'dev', ...process.argv.slice(2)];
   if (process.platform === 'darwin') {
-    // macOS 透明窗口依赖 macos-private-api；通过 npm 的 `--` 分隔符传参，是为了避免 npm 把 --features 当成自身配置并丢给 Cargo。
-    // macOS transparent windows depend on macos-private-api; the npm `--` separator keeps --features from being parsed as npm config and leaking to Cargo args.
+    // macOS 透明窗口需要专属 feature；直接传给 Tauri CLI 可避免 npm 把 --features 误报成未知配置。
+    // macOS transparent windows require a dedicated feature; passing it directly to the Tauri CLI prevents npm from warning that --features is an unknown configuration key.
     tauriArgs.push('--features', 'macos-private-api');
   }
+  tauriArgs.push('--config', JSON.stringify({ build: { beforeDevCommand: null, devUrl } }));
 
-  // Tauri 的 JSON Merge Patch 会覆盖固定 devUrl 并删除内置 beforeDevCommand，因为 Vite 已由本脚本以通过权限探测的端口启动。
-  // Tauri's JSON Merge Patch overrides the fixed devUrl and removes the built-in beforeDevCommand because this script already started Vite on a permission-tested port.
-  tauriArgs.push('--config', JSON.stringify({
-    build: {
-      beforeDevCommand: null,
-      devUrl
-    }
-  }));
-
-  tauriProcess = spawn(npmCommand, tauriArgs, {
+  tauriProcess = spawn(process.execPath, tauriArgs, {
     stdio: 'inherit',
-    shell: npmNeedsShell,
     windowsHide: true,
     env: { ...process.env, CLIPANCHOR_DEV_PORT: String(port) }
   });
-
   tauriProcess.once('error', (error) => {
     console.error(`Failed to start Tauri: ${error.message}`);
     shutdown(1);
@@ -150,9 +194,7 @@ async function main() {
   });
 }
 
-for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
-  process.on(signal, () => shutdown(0));
-}
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => shutdown(0));
 
 main().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error));

@@ -1,6 +1,6 @@
 [package]
 name = "clipanchor"
-version = "0.5.7"
+version = "0.6.1"
 edition = "2021"
 publish = false
 license = "Apache-2.0"
@@ -8,8 +8,8 @@ license = "Apache-2.0"
 [package.metadata]
 
 [lints.rust]
-# objc 0.2 的宏内部仍引用 cargo-clippy feature cfg；全局允许该 lint 是为了清理 macOS 构建输出中的依赖噪声，而不是掩盖项目代码问题。
-# objc 0.2 macros still reference a cargo-clippy feature cfg internally; allowing this lint globally cleans dependency noise from macOS builds without hiding project-code issues.
+# 旧版 objc 宏内部仍引用 cargo-clippy feature cfg；全局允许该 lint 是为了清理 macOS 构建输出中的依赖噪声，而不是掩盖项目代码问题。
+# Legacy objc macros still reference a cargo-clippy feature cfg internally; allowing this lint globally cleans dependency noise from macOS builds without hiding project-code issues.
 unexpected_cfgs = "allow"
 
 [features]
@@ -38,16 +38,25 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 reqwest = { version = "0.13.4", features = ["blocking", "json"] }
 rusqlite = { version = "0.28.0", features = ["bundled"] }
-arboard = "3.6.1"
+arboard = { version = "3.6.1", features = ["wayland-data-control"] }
 chrono = { version = "0.4", features = ["serde", "clock"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tiff"] }
 base64 = "0.22"
 raw-window-handle = "0.6"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Console", "Win32_System_DataExchange", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_System_Memory", "Win32_UI_Input_KeyboardAndMouse", "Win32_Globalization"] }
 winreg = "0.55"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gdk = "0.18.2"
+gdk-pixbuf = "0.18.5"
+gtk = "0.18.2"
+url = "2.5.8"
+ashpd = { version = "0.13", default-features = false, features = ["tokio", "global_shortcuts"] }
+futures-util = "0.3"
+tokio = { version = "1", features = ["macros", "sync", "time"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"

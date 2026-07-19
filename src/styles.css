@@ -2,6 +2,7 @@
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color-scheme: dark;
   --blue: #319FFF;
+  --accent: var(--blue);
   --coral: #F4A9AA;
   --bg: #07090d;
   --bg-raised: #0c0f14;
@@ -6929,7 +6930,7 @@ body:not(.clipanchor-popup-body) .codex-shell.app-shell.window-maximized .codex-
 }
 
 
-/* v0.5.7: macOS API-key paste, language-folder access, and data-management spacing. */
+/* macOS API-key paste, language-folder access, and data-management spacing. */
 .translation-api-key-wrap {
   grid-template-columns: auto minmax(190px, 1fr) auto !important;
 }
@@ -6992,7 +6993,7 @@ body:not(.clipanchor-popup-body) .codex-shell.app-shell.window-maximized .codex-
   }
 }
 
-/* v0.5.7 follow-up: keep API-key actions inside their card and show the complete language-pack path. */
+/* Keep API-key actions inside their card and show the complete language-pack path. */
 .translation-api-key-wrap {
   grid-template-columns: auto minmax(0, 1fr) !important;
   grid-template-areas:
@@ -7088,7 +7089,7 @@ body:not(.clipanchor-popup-body) .codex-shell.app-shell.window-maximized .codex-
 
 
 
-/* v0.5.7 language compatibility/layout refinement:
+/* Language compatibility and layout refinement:
    balanced provider/API-key cards, selectable native paths, and usable older packs. */
 .translation-provider-actions {
   grid-template-columns: minmax(240px, .82fr) minmax(430px, 1.35fr) !important;
@@ -7235,7 +7236,7 @@ body:not(.clipanchor-popup-body) .codex-shell.app-shell.window-maximized .codex-
 }
 
 
-/* v0.5.7 final language-service refinement:
+/* Final language-service refinement:
    compact API-key layout that remains stable for long translated labels. */
 .translation-service-grid {
   display: grid;
@@ -7335,7 +7336,7 @@ body:not(.clipanchor-popup-body) .codex-shell.app-shell.window-maximized .codex-
   width: min(560px, calc(100vw - 56px));
 }
 
-/* v0.5.7 incremental-language follow-up
+/* Incremental-language follow-up
    Use one clean credential row instead of nested field cards. Unique class names avoid
    legacy translation-service grid rules affecting long Japanese/Traditional Chinese labels. */
 .translation-api-settings {
@@ -7476,9 +7477,9 @@ body:not(.clipanchor-popup-body) .codex-shell.app-shell.window-maximized .codex-
   }
 }
 
-/* v0.5.7 language-service layout hard reset.
+/* Language-service layout hard reset.
    These unique selectors intentionally bypass all legacy provider/API-key grid rules. */
-.translation-service-panel-v057 {
+.translation-service-panel {
   display: block;
   width: 100%;
   min-width: 0;
@@ -7490,7 +7491,7 @@ body:not(.clipanchor-popup-body) .codex-shell.app-shell.window-maximized .codex-
   box-sizing: border-box;
 }
 
-.translation-service-panel-v057__heading {
+.translation-service-panel__heading {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
@@ -7499,7 +7500,7 @@ body:not(.clipanchor-popup-body) .codex-shell.app-shell.window-maximized .codex-
   margin-bottom: 12px;
 }
 
-.translation-service-panel-v057__heading > strong {
+.translation-service-panel__heading > strong {
   flex: 0 0 auto;
   color: var(--text);
   font-size: 13px;
@@ -7507,7 +7508,7 @@ body:not(.clipanchor-popup-body) .codex-shell.app-shell.window-maximized .codex-
   line-height: 1.35;
 }
 
-.translation-service-panel-v057__heading > small {
+.translation-service-panel__heading > small {
   flex: 1 1 360px;
   min-width: 0;
   color: var(--muted);
@@ -7516,7 +7517,7 @@ body:not(.clipanchor-popup-body) .codex-shell.app-shell.window-maximized .codex-
   overflow-wrap: anywhere;
 }
 
-.translation-service-panel-v057__controls {
+.translation-service-panel__controls {
   display: grid;
   grid-template-columns: minmax(230px, .72fr) minmax(0, 1.7fr);
   align-items: end;
@@ -7525,7 +7526,7 @@ body:not(.clipanchor-popup-body) .codex-shell.app-shell.window-maximized .codex-
   min-width: 0;
 }
 
-.translation-service-panel-v057__field {
+.translation-service-panel__field {
   display: grid;
   grid-template-rows: auto 44px;
   align-content: end;
@@ -7538,7 +7539,7 @@ body:not(.clipanchor-popup-body) .codex-shell.app-shell.window-maximized .codex-
   box-sizing: border-box;
 }
 
-.translation-service-panel-v057__label {
+.translation-service-panel__label {
   display: block;
   width: auto;
   min-width: 0;
@@ -7552,8 +7553,8 @@ body:not(.clipanchor-popup-body) .codex-shell.app-shell.window-maximized .codex-
   overflow-wrap: anywhere;
 }
 
-.translation-service-panel-v057__provider .codex-dropdown,
-.translation-service-panel-v057__provider .codex-dropdown-button {
+.translation-service-panel__provider .codex-dropdown,
+.translation-service-panel__provider .codex-dropdown-button {
   width: 100% !important;
   min-width: 0 !important;
   height: 44px !important;
@@ -7562,7 +7563,7 @@ body:not(.clipanchor-popup-body) .codex-shell.app-shell.window-maximized .codex-
   box-sizing: border-box !important;
 }
 
-.translation-service-panel-v057__key-row {
+.translation-service-panel__key-row {
   display: grid;
   grid-template-columns: minmax(170px, 1fr) max-content max-content;
   align-items: stretch;
@@ -7571,20 +7572,20 @@ body:not(.clipanchor-popup-body) .codex-shell.app-shell.window-maximized .codex-
   min-width: 0;
 }
 
-.translation-service-panel-v057__key-row > input,
-.translation-service-panel-v057__key-row > .soft-button {
+.translation-service-panel__key-row > input,
+.translation-service-panel__key-row > .soft-button {
   height: 44px !important;
   min-height: 44px !important;
   margin: 0 !important;
   box-sizing: border-box !important;
 }
 
-.translation-service-panel-v057__key-row > input {
+.translation-service-panel__key-row > input {
   width: 100% !important;
   min-width: 0 !important;
 }
 
-.translation-service-panel-v057__key-row > .soft-button {
+.translation-service-panel__key-row > .soft-button {
   width: auto !important;
   min-width: max-content !important;
   padding-inline: 14px !important;
@@ -7593,29 +7594,255 @@ body:not(.clipanchor-popup-body) .codex-shell.app-shell.window-maximized .codex-
 }
 
 @media (max-width: 900px) {
-  .translation-service-panel-v057__controls {
+  .translation-service-panel__controls {
     grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
   }
 }
 
 @media (max-width: 610px) {
-  .translation-service-panel-v057__key-row {
+  .translation-service-panel__key-row {
     grid-template-columns: minmax(0, 1fr) repeat(2, minmax(92px, auto));
   }
 }
 
 @media (max-width: 500px) {
-  .translation-service-panel-v057__key-row {
+  .translation-service-panel__key-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .translation-service-panel-v057__key-row > input {
+  .translation-service-panel__key-row > input {
     grid-column: 1 / -1;
   }
 
-  .translation-service-panel-v057__key-row > .soft-button {
+  .translation-service-panel__key-row > .soft-button {
     width: 100% !important;
     min-width: 0 !important;
+  }
+}
+
+
+/* 这些最终覆盖集中修复跨平台选中态与弹窗合成层问题，避免旧样式层级再次覆盖真实状态。 */
+/* These final overrides fix cross-platform selected states and modal compositor surfaces so older style layers cannot mask the real state again. */
+.language-pack-select[aria-checked="true"] .language-pack-check,
+.language-pack-option.active .language-pack-check {
+  position: relative;
+  border-color: color-mix(in srgb, var(--blue) 88%, white) !important;
+  border-radius: 50% !important;
+  background: var(--blue) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 16%, transparent), inset 0 1px 0 rgba(255, 255, 255, .28) !important;
+}
+
+.language-pack-select[aria-checked="true"] .language-pack-check::after,
+.language-pack-option.active .language-pack-check::after {
+  content: "✓";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: transparent;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.language-pack-select[aria-checked="false"] .language-pack-check {
+  border-radius: 50% !important;
+}
+
+/* Windows WebView2 可能把 backdrop-filter 提升为未裁剪的直角合成层；改用普通绘制遮罩可让暗化效果始终留在应用圆角内。 */
+/* Windows WebView2 may promote backdrop-filter into an unclipped rectangular compositor layer; a painted overlay keeps the native-looking dim state inside the app radius. */
+body:not(.clipanchor-popup-body) .soft-modal-backdrop {
+  overflow: hidden;
+  border-radius: var(--window-radius) !important;
+  clip-path: inset(0 round var(--window-radius));
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  background: color-mix(in srgb, var(--bg) 72%, transparent) !important;
+}
+
+body:not(.clipanchor-popup-body) .window-maximized > .soft-modal-backdrop {
+  border-radius: 0 !important;
+  clip-path: none;
+}
+
+body:not(.clipanchor-popup-body) .soft-modal-card {
+  overflow: hidden;
+  background-clip: padding-box;
+  transform: translateZ(0);
+}
+
+/* 扩展语言目录操作在桌面端保持紧凑，在窄屏上仍保留足够触控面积。 */
+/* Extension-language folder controls stay compact on desktop while remaining touch-friendly on narrow layouts. */
+.language-folder-actions .reload-language-folder-button {
+  width: auto !important;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.language-folder-actions .is-spinning {
+  animation: language-folder-refresh-spin .8s linear infinite;
+}
+
+.language-reload-status {
+  margin: -2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.language-reload-status.error {
+  color: var(--danger);
+}
+
+@keyframes language-folder-refresh-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 620px) {
+  .language-folder-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .language-folder-actions .reload-language-folder-button {
+    width: 100% !important;
+  }
+}
+
+/* 快捷键冲突图标位于输入框内部右侧，让默认组合一旦被系统或其他软件占用就能在原位置即时提示，而不是等保存失败后才暴露问题。 */
+/* The shortcut-conflict icon lives inside the input at the right edge so a default binding claimed by the system or another app is visible immediately instead of only after save failure. */
+.shortcut-input-shell {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+.shortcut-input-shell input {
+  width: 100%;
+  padding-right: 38px;
+}
+
+.shortcut-conflict-indicator {
+  position: absolute;
+  top: 50%;
+  right: 11px;
+  z-index: 2;
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  color: var(--coral);
+  background: color-mix(in srgb, var(--coral) 13%, var(--surface));
+  cursor: help;
+  transform: translateY(-50%);
+  outline: none;
+}
+
+.shortcut-conflict-indicator::after {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 9px);
+  width: max-content;
+  max-width: min(320px, calc(100vw - 40px));
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--coral) 35%, var(--line));
+  border-radius: 10px;
+  background: var(--panel-solid);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .24);
+  color: var(--text);
+  content: attr(data-tooltip);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.45;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+  white-space: normal;
+}
+
+.shortcut-conflict-indicator:hover::after,
+.shortcut-conflict-indicator:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+/* 页面标题区采用统一的紧凑导航锚点，是为了避免重复副标题占用空间，并让剪贴板、收藏夹与偏好设置保持完全一致的视觉层级。 */
+/* The page heading uses one compact navigation anchor so repeated subtitles do not consume space and Clipboard, Favorites, and Preferences share an identical visual hierarchy. */
+body:not(.clipanchor-popup-body) .workspace-header.compact-workspace-header {
+  min-height: 66px !important;
+  display: flex !important;
+  align-items: center !important;
+  padding: 3px 166px 11px 4px !important;
+  border-bottom-color: color-mix(in srgb, var(--line) 82%, transparent) !important;
+}
+
+.workspace-heading {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.workspace-heading-icon {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--blue);
+  border: 1px solid color-mix(in srgb, var(--blue) 23%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--blue) 8%, var(--surface));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 5%, transparent);
+}
+
+.workspace-heading h1 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: clamp(22px, 2.1vw, 28px) !important;
+  line-height: 1.12;
+  letter-spacing: -.035em;
+  font-weight: 720;
+}
+
+@media (max-width: 760px) {
+  body:not(.clipanchor-popup-body) .workspace-header.compact-workspace-header {
+    min-height: 58px !important;
+    padding: 2px 136px 9px 2px !important;
+  }
+
+  .workspace-heading {
+    gap: 9px;
+  }
+
+  .workspace-heading-icon {
+    width: 31px;
+    height: 31px;
+    flex-basis: 31px;
+    border-radius: 9px;
+  }
+
+  .workspace-heading h1 {
+    font-size: 21px !important;
   }
 }

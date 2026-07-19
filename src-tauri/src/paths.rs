@@ -1,4 +1,4 @@
-use std::{env, fs, path::{Path, PathBuf}};
+use std::{collections::HashSet, env, fs, path::{Path, PathBuf}};
 
 #[derive(Clone, Debug)]
 pub struct DataPaths {
@@ -146,6 +146,211 @@ fn copy_dir_contents(from: &Path, to: &Path) -> Result<(), String> {
     Ok(())
 }
 
+
+
+pub fn sync_language_pack_sources(paths: &DataPaths, resource_dir: Option<&Path>) -> Result<usize, String> {
+    fs::create_dir_all(&paths.locales).map_err(|error| error.to_string())?;
+
+    let mut candidates: Vec<(PathBuf, bool)> = Vec::new();
+    if let Some(resources) = resource_dir {
+        // Linux 包管理器与 Tauri 的资源映射可能把上级资源放在 extension-locales 或 _up_/extension-locales；同时探测两种布局可避免安装版漏掉内置语言。
+        // Linux packages and Tauri resource mapping may place parent resources under extension-locales or _up_/extension-locales; probing both layouts keeps bundled languages discoverable.
+        candidates.push((resources.join("extension-locales"), false));
+        candidates.push((resources.join("_up_").join("extension-locales"), false));
+    }
+    candidates.push((paths.root.join("extension-locales"), false));
+    candidates.push((paths.root.join("data/locales"), true));
+
+    if let Ok(current_dir) = env::current_dir() {
+        candidates.push((current_dir.join("extension-locales"), false));
+        candidates.push((current_dir.join("data/locales"), true));
+        if current_dir.file_name().and_then(|value| value.to_str()) == Some("src-tauri") {
+            if let Some(project_root) = current_dir.parent() {
+                candidates.push((project_root.join("extension-locales"), false));
+                candidates.push((project_root.join("data/locales"), true));
+            }
+        }
+    }
+
+    let destination_key = normalized_existing_path(&paths.locales);
+    let mut visited = HashSet::new();
+    let mut synchronized = 0usize;
+    for (source, refresh_existing) in candidates {
+        if !source.is_dir() {
+            continue;
+        }
+        let source_key = normalized_existing_path(&source);
+        if source_key == destination_key || !visited.insert(source_key) {
+            continue;
+        }
+
+        // Linux 的 DEB/RPM 资源映射可能额外保留一层源目录；有限深度递归可兼容该布局，同时避免遍历整个安装树。
+        // Linux DEB/RPM resource mappings may retain an extra source-directory level; bounded recursion supports that layout without walking the entire installation tree.
+        for source_file in collect_language_json_files(&source, 3) {
+            let Some(file_name) = source_file.file_name() else {
+                continue;
+            };
+            let target = paths.locales.join(file_name);
+            if target.exists() {
+                if !refresh_existing && !should_refresh_reviewed_language_pack(&source_file, &target) {
+                    // 普通随包语言只补齐缺失文件；只有经过人工校正且目标包没有手动修改时才更新，避免覆盖用户维护的翻译。
+                    // Ordinary bundled languages only fill missing files; a reviewed pack refreshes an existing file only when that target has no manual edits, preventing user-maintained translations from being overwritten.
+                    continue;
+                }
+                let source_bytes = match fs::read(&source_file) {
+                    Ok(bytes) => bytes,
+                    Err(_) => continue,
+                };
+                let target_matches = fs::read(&target).map(|bytes| bytes == source_bytes).unwrap_or(false);
+                if target_matches {
+                    continue;
+                }
+                // 开发目录、旧便携目录或更晚的人工校正包需要刷新活动副本；前面的保护条件已经排除了带手动修改标记的用户翻译。
+                // Development directories, legacy portable sources, and newer reviewed packs refresh the active copy; the guard above has already excluded user translations marked as manually edited.
+                fs::write(&target, source_bytes).map_err(|error| {
+                    format!(
+                        "Cannot refresh language file {} from {}: {}",
+                        target.display(),
+                        source_file.display(),
+                        error
+                    )
+                })?;
+                synchronized += 1;
+                continue;
+            }
+
+            fs::copy(&source_file, &target).map_err(|error| {
+                format!(
+                    "Cannot copy language file {} to {}: {}",
+                    source_file.display(),
+                    target.display(),
+                    error
+                )
+            })?;
+            synchronized += 1;
+        }
+    }
+    Ok(synchronized)
+}
+
+
+fn should_refresh_reviewed_language_pack(source: &Path, target: &Path) -> bool {
+    let source_value = match fs::read(source)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+    {
+        Some(value) => value,
+        None => return false,
+    };
+    let target_value = match fs::read(target)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+    {
+        Some(value) => value,
+        None => return false,
+    };
+
+    let source_provider = source_value
+        .get("source")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    if !source_provider.starts_with("ClipAnchor reviewed language pack") {
+        return false;
+    }
+
+    let source_code = source_value
+        .get("code")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let target_code = target_value
+        .get("code")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    if source_code.is_empty() || !source_code.eq_ignore_ascii_case(target_code) {
+        return false;
+    }
+
+    let target_provider = target_value
+        .get("source")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let generated_target = target_provider.starts_with("UAPI translate API")
+        || target_provider.starts_with("MyMemory")
+        || target_provider.starts_with("ClipAnchor reviewed language pack");
+    if !generated_target {
+        return false;
+    }
+
+    let statuses = match target_value
+        .get("message_status")
+        .and_then(serde_json::Value::as_object)
+    {
+        Some(statuses) if !statuses.is_empty() => statuses,
+        _ => return false,
+    };
+    if statuses.values().any(|status| {
+        status
+            .get("modified")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+    }) {
+        return false;
+    }
+
+    let source_generated_at = source_value
+        .get("generated_at")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let target_generated_at = target_value
+        .get("generated_at")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    // ISO 8601 UTC 时间可以按字符串比较；仅接受更新的人工校正包，避免每次启动重复写入相同文件。
+    // ISO 8601 UTC timestamps are lexically sortable; accepting only a newer reviewed pack avoids rewriting the same file on every startup.
+    source_generated_at > target_generated_at
+}
+
+fn collect_language_json_files(root: &Path, max_depth: usize) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let mut pending = vec![(root.to_path_buf(), 0usize)];
+    while let Some((directory, depth)) = pending.pop() {
+        let entries = match fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let file_type = match entry.file_type() {
+                Ok(file_type) => file_type,
+                Err(_) => continue,
+            };
+            if file_type.is_dir() && depth < max_depth {
+                pending.push((path, depth + 1));
+                continue;
+            }
+            if !file_type.is_file() {
+                continue;
+            }
+            let is_json = path
+                .extension()
+                .and_then(|value| value.to_str())
+                .map(|value| value.eq_ignore_ascii_case("json"))
+                .unwrap_or(false);
+            if is_json {
+                files.push(path);
+            }
+        }
+    }
+    files.sort_by_key(|path| path.to_string_lossy().to_ascii_lowercase());
+    files
+}
+
+fn normalized_existing_path(path: &Path) -> String {
+    fs::canonicalize(path)
+        .unwrap_or_else(|_| path.to_path_buf())
+        .to_string_lossy()
+        .to_string()
+}
 
 pub fn configure_webview_storage(paths: &DataPaths) -> Result<(), String> {
     #[cfg(target_os = "windows")]

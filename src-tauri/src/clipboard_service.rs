@@ -2,10 +2,24 @@ use crate::{app_log, database, models::{AppState, AppSettings, ClipItem, ClipKin
 use arboard::{Clipboard, ImageData};
 use chrono::Utc;
 use image::{ImageBuffer, Rgba};
-use std::{borrow::Cow, fs, io::Cursor, panic::{catch_unwind, AssertUnwindSafe}, path::Path, sync::{atomic::{AtomicBool, Ordering}, Arc}, thread, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{borrow::Cow, fs, io::Cursor, panic::{catch_unwind, AssertUnwindSafe}, path::Path, sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex, OnceLock}, thread, time::{Duration, SystemTime, UNIX_EPOCH}};
+#[cfg(target_os = "linux")]
+use std::{
+    cell::RefCell,
+    collections::HashSet,
+    path::PathBuf,
+    sync::{
+        atomic::AtomicU64,
+        mpsc,
+    },
+};
 #[cfg(target_os = "windows")]
 use std::{mem, ptr};
+#[cfg(target_os = "linux")]
+use gtk::prelude::*;
 use tauri::{AppHandle, Emitter};
+#[cfg(target_os = "linux")]
+use url::Url;
 use uuid::Uuid;
 
 #[cfg(target_os = "windows")]
@@ -20,8 +34,8 @@ use windows_sys::Win32::{
 };
 
 #[cfg(target_os = "windows")]
-// CF_HDROP 在 windows-sys 0.59 中没有从 DataExchange 模块导出，直接使用 Win32 固定格式编号可以避免依赖版本差异导致编译失败。
-// CF_HDROP is not exported from the DataExchange module in windows-sys 0.59, so using the stable Win32 format id avoids compile failures across dependency versions.
+// CF_HDROP 在当前 windows-sys 接口中没有从 DataExchange 模块导出，直接使用 Win32 固定格式编号可以避免依赖版本差异导致编译失败。
+// CF_HDROP is not exported from the DataExchange module by the current windows-sys interface, so using the stable Win32 format id avoids compile failures across dependency versions.
 const CF_HDROP: u32 = 15;
 
 #[cfg(target_os = "windows")]
@@ -43,7 +57,79 @@ const MONITOR_POLL_MS: u64 = 650;
 const MONITOR_WATCHDOG_MS: u64 = 30_000;
 const MONITOR_STALE_SECONDS: i64 = 90;
 
+#[cfg(target_os = "linux")]
+const LINUX_CLIPBOARD_MAIN_THREAD_TIMEOUT_SECONDS: u64 = 5;
+#[cfg(target_os = "linux")]
+const LINUX_NON_TEXT_RETRY_COUNT: usize = 4;
+#[cfg(target_os = "linux")]
+const LINUX_NON_TEXT_RETRY_DELAY_MS: u64 = 45;
+#[cfg(target_os = "linux")]
+const MAX_LINUX_ENCODED_IMAGE_BYTES: usize = 64 * 1024 * 1024;
+#[cfg(target_os = "linux")]
+const MAX_LINUX_DECODED_IMAGE_BYTES: usize = 256 * 1024 * 1024;
+
+static SYSTEM_CLIPBOARD: OnceLock<Mutex<Option<Clipboard>>> = OnceLock::new();
+
+#[cfg(target_os = "linux")]
+thread_local! {
+    // GTK 剪贴板对象只能在创建它的 GTK 主线程使用，因此保存在主线程本地存储中，而不是跨线程放进全局互斥锁。
+    // GTK clipboard objects may only be used on the GTK main thread that created them, so the bridge stays in main-thread local storage instead of a cross-thread mutex.
+    static LINUX_CLIPBOARD_BRIDGE: RefCell<Option<gtk::Clipboard>> = const { RefCell::new(None) };
+}
+
+#[cfg(target_os = "linux")]
+static LINUX_CLIPBOARD_BRIDGE_READY: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "linux")]
+static LINUX_CLIPBOARD_CHANGE_COUNT: AtomicU64 = AtomicU64::new(1);
+#[cfg(target_os = "linux")]
+static LAST_LINUX_DIAGNOSTIC: OnceLock<Mutex<String>> = OnceLock::new();
+
+fn with_system_clipboard<T>(operation: impl FnOnce(&mut Clipboard) -> Result<T, arboard::Error>) -> Result<T, String> {
+    let clipboard_slot = SYSTEM_CLIPBOARD.get_or_init(|| Mutex::new(None));
+    let mut guard = clipboard_slot.lock().map_err(|_| "System clipboard lock is poisoned".to_string())?;
+    if guard.is_none() {
+        // Linux 剪贴板内容由持有者进程提供，因此复用同一个实例既减少 Wayland/X11 连接抖动，也保证 ClipAnchor 写入的内容不会因对象立即销毁而失效。
+        // Linux clipboard data is served by the owning process, so reusing one instance reduces Wayland/X11 connection churn and keeps ClipAnchor-written content alive after the call returns.
+        *guard = Some(Clipboard::new().map_err(|error| error.to_string())?);
+    }
+    let clipboard = guard.as_mut().ok_or_else(|| "System clipboard could not be initialized".to_string())?;
+    let result = operation(clipboard);
+    match result {
+        Ok(value) => Ok(value),
+        Err(error) => {
+            let message = error.to_string();
+            if !clipboard_content_unavailable(&message) {
+                // 连接类错误后丢弃实例，是为了让下一轮轮询重新建立后端，而不是永久复用失效的 Wayland/X11 连接。
+                // Dropping the instance after connection errors lets the next poll rebuild the backend instead of permanently reusing a broken Wayland/X11 connection.
+                guard.take();
+            }
+            Err(message)
+        }
+    }
+}
+
+fn clipboard_content_unavailable(message: &str) -> bool {
+    let normalized = message.to_ascii_lowercase();
+    // 各 Linux 后端对“当前 MIME 不存在”的错误文本并不完全一致；统一归类为无内容可避免把正常的文本/图片格式切换误判成连接故障并反复重建会话。
+    // Linux backends phrase a missing MIME payload differently; treating all of them as ordinary absence avoids rebuilding the session whenever clipboard formats switch normally.
+    normalized.contains("content not available")
+        || normalized.contains("not available")
+        || normalized.contains("clipboard is empty")
+        || normalized.contains("incompatible format")
+        || normalized.contains("not utf-8 text")
+        || normalized.contains("not text")
+}
+
 pub fn ensure_monitor(app: AppHandle, state: AppState) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        // 初始化失败时仍启动监听线程，是为了兼容应用启动早期 GTK 主循环尚未就绪的桌面环境；后续轮询会继续重试原生桥接，并在此期间使用降级读取。
+        // The monitor still starts when early GTK initialization is unavailable because some desktops are not ready during application setup; later polls retry the native bridge and use fallback reads meanwhile.
+        if let Err(error) = ensure_linux_clipboard_bridge(&app) {
+            app_log::warn(&state.paths, "clipboard", format!("linux native clipboard bridge deferred: {}", error));
+        }
+    }
+
     let mut guard = state.monitor_stop.lock().map_err(|error| error.to_string())?;
     if guard.is_some() {
         return Ok(());
@@ -55,7 +141,7 @@ pub fn ensure_monitor(app: AppHandle, state: AppState) -> Result<(), String> {
     state.monitor_heartbeat.store(unix_now(), Ordering::Relaxed);
     app_log::info(&state.paths, "clipboard", "clipboard monitor started");
     thread::spawn(move || {
-        let mut last_signature = initial_signature(&state).unwrap_or_default();
+        let mut last_signature = initial_signature(&app, &state).unwrap_or_default();
         while !stop.load(Ordering::Relaxed) {
             state.monitor_heartbeat.store(unix_now(), Ordering::Relaxed);
             // 剪贴板来源不可控，轮询体必须捕获 panic，避免某次系统剪贴板异常导致后台服务永久退出。
@@ -124,29 +210,40 @@ fn unix_now() -> i64 {
 }
 
 
-fn initial_signature(state: &AppState) -> Result<String, String> {
+fn initial_signature(app: &AppHandle, state: &AppState) -> Result<String, String> {
     let settings = state.settings.lock().map_err(|error| error.to_string())?.clone();
     // 启动监听时先记录当前剪贴板指纹，是为了避免把启动前已经存在的内容误认为新复制并弹窗。
     // The monitor records the existing clipboard signature on startup so pre-existing clipboard content is not mistaken for a new copy.
-    if settings.filter_file {
-        if let Ok(paths) = read_file_paths_from_clipboard() {
-            if !paths.is_empty() {
-                return Ok(clipboard_change_signature(&content_hash_for_paths(&paths)));
+    #[cfg(target_os = "linux")]
+    {
+        // Linux 同时读取 arboard 与 GTK 表示，是为了避免文件管理器发布文本回退时把真实文件或图片误判成普通文本。
+        // Linux reads both arboard and GTK representations so a file manager's text fallback cannot hide the real file or image payload.
+        let snapshot = read_linux_clipboard_snapshot(app, &settings)?;
+        log_linux_clipboard_diagnostics(state, &snapshot.diagnostics);
+        return Ok(linux_snapshot_signature(&snapshot));
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        if settings.filter_file {
+            if let Ok(paths) = read_file_paths_from_clipboard() {
+                if !paths.is_empty() {
+                    return Ok(clipboard_change_signature(&content_hash_for_paths(&paths)));
+                }
             }
         }
-    }
-    if settings.filter_text {
-        if let Ok(Some(text)) = read_clipboard_text() {
-            return Ok(clipboard_change_signature(&content_hash_for_bytes("text", text.as_bytes())));
+        if settings.filter_image {
+            if let Ok(Some(image)) = read_clipboard_image() {
+                return Ok(clipboard_change_signature(&content_hash_for_bytes("image", image.bytes.as_ref())));
+            }
         }
-    }
-    let mut clipboard = Clipboard::new().map_err(|error| error.to_string())?;
-    if settings.filter_image {
-        if let Ok(image) = clipboard.get_image() {
-            return Ok(clipboard_change_signature(&content_hash_for_bytes("image", image.bytes.as_ref())));
+        if settings.filter_text {
+            if let Ok(Some(text)) = read_clipboard_text() {
+                return Ok(clipboard_change_signature(&content_hash_for_bytes("text", text.as_bytes())));
+            }
         }
+        Ok(String::new())
     }
-    Ok(String::new())
 }
 
 pub fn stop_monitor(state: &AppState) {
@@ -163,48 +260,799 @@ fn poll_once(app: &AppHandle, state: &AppState, last_signature: &mut String) -> 
     if !settings.pin_service_enabled && !settings.history_service_enabled {
         return Ok(());
     }
-    if settings.filter_file {
-        if let Ok(paths) = read_file_paths_from_clipboard() {
-            if !paths.is_empty() {
-                let signature = clipboard_change_signature(&content_hash_for_paths(&paths));
+
+    #[cfg(target_os = "linux")]
+    {
+        return poll_linux_once(app, state, &settings, last_signature);
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        if settings.filter_file {
+            if let Ok(paths) = read_file_paths_from_clipboard() {
+                if !paths.is_empty() {
+                    let signature = clipboard_change_signature(&content_hash_for_paths(&paths));
+                    if signature != *last_signature {
+                        *last_signature = signature;
+                        let item = item_from_files(paths);
+                        process_item(app, state, &settings, item)?;
+                    }
+                    // Finder 和 Explorer 会同时提供真实文件对象与文本回退；确认文件后停止读取，避免同一复制动作被重复分类。
+                    // Finder and Explorer expose real file objects plus text fallbacks; stopping after a confirmed file prevents one copy action from being classified twice.
+                    return Ok(());
+                }
+            }
+        }
+
+        // 图片必须先于文本读取，因为截图工具和富媒体应用经常同时提供图像与文本回退；先读文本会把真实图片吞掉。
+        // Images must be read before text because screenshot tools and rich-media apps often expose both image data and a text fallback; text-first polling hides the real image.
+        if settings.filter_image {
+            if let Some(image) = read_clipboard_image()? {
+                let bytes = image.bytes.to_vec();
+                let signature = clipboard_change_signature(&content_hash_for_bytes("image", &bytes));
                 if signature != *last_signature {
                     *last_signature = signature;
-                    let item = item_from_files(paths);
+                    let item = item_from_image(image, state)?;
                     process_item(app, state, &settings, item)?;
                 }
-                // macOS Finder 会同时把“真实文件 URL”和“文件名文本”放入剪贴板；只要已确认存在文件对象，就必须停止后续文本读取，避免同一次复制在文件弹窗与文本弹窗之间反复跳变。
-                // macOS Finder places both real file URLs and filename text on the pasteboard; once a file object is confirmed, text fallback must stop to prevent the same copy from bouncing between file and text popups.
                 return Ok(());
             }
         }
-    }
 
-    if settings.filter_text {
-        if let Ok(Some(text)) = read_clipboard_text() {
-            let signature = clipboard_change_signature(&content_hash_for_bytes("text", text.as_bytes()));
-            if signature != *last_signature {
-                *last_signature = signature;
-                let item = item_from_text(text, &settings);
-                process_item(app, state, &settings, item)?;
-                return Ok(());
+        if settings.filter_text {
+            match read_clipboard_text() {
+                Ok(Some(text)) => {
+                    let signature = clipboard_change_signature(&content_hash_for_bytes("text", text.as_bytes()));
+                    if signature != *last_signature {
+                        *last_signature = signature;
+                        let item = item_from_text(text, &settings);
+                        process_item(app, state, &settings, item)?;
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => return Err(format!("text clipboard read failed: {}", error)),
             }
         }
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, Debug)]
+struct LinuxClipboardFilters {
+    text: bool,
+    image: bool,
+    file: bool,
+}
+
+#[cfg(target_os = "linux")]
+impl From<&AppSettings> for LinuxClipboardFilters {
+    fn from(settings: &AppSettings) -> Self {
+        Self {
+            text: settings.filter_text,
+            image: settings.filter_image,
+            file: settings.filter_file,
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Debug)]
+struct LinuxClipboardImage {
+    width: usize,
+    height: usize,
+    bytes: Vec<u8>,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Debug)]
+enum LinuxClipboardContent {
+    Files(Vec<String>),
+    Image(LinuxClipboardImage),
+    Text(String),
+    Empty,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Debug)]
+struct LinuxClipboardSnapshot {
+    change_count: u64,
+    content: LinuxClipboardContent,
+    diagnostics: Vec<String>,
+}
+
+#[cfg(target_os = "linux")]
+fn ensure_linux_clipboard_bridge(app: &AppHandle) -> Result<(), String> {
+    if LINUX_CLIPBOARD_BRIDGE_READY.load(Ordering::Acquire) {
+        return Ok(());
+    }
+    if gtk::is_initialized_main_thread() {
+        return install_linux_clipboard_bridge_on_main_thread();
     }
 
+    let (sender, receiver) = mpsc::sync_channel(1);
+    app.run_on_main_thread(move || {
+        let result = catch_unwind(AssertUnwindSafe(install_linux_clipboard_bridge_on_main_thread))
+            .map_err(|_| "GTK clipboard bridge initialization panicked".to_string())
+            .and_then(|result| result);
+        let _ = sender.send(result);
+    }).map_err(|error| format!("Cannot schedule GTK clipboard bridge initialization: {}", error))?;
+
+    receiver
+        .recv_timeout(Duration::from_secs(LINUX_CLIPBOARD_MAIN_THREAD_TIMEOUT_SECONDS))
+        .map_err(|error| format!("GTK clipboard bridge initialization timed out: {}", error))?
+}
+
+#[cfg(target_os = "linux")]
+fn install_linux_clipboard_bridge_on_main_thread() -> Result<(), String> {
+    if LINUX_CLIPBOARD_BRIDGE_READY.load(Ordering::Acquire) {
+        return Ok(());
+    }
+    if !gtk::is_initialized_main_thread() {
+        return Err("GTK clipboard bridge must be initialized on the GTK main thread".into());
+    }
+
+    LINUX_CLIPBOARD_BRIDGE.with(|slot| -> Result<(), String> {
+        if slot.borrow().is_none() {
+            // 让线程局部闭包显式返回 Result，才能安全传播显示服务器初始化失败，而不是在返回 () 的闭包中误用 ?。
+            // Returning Result explicitly from the thread-local closure lets display initialization failures propagate safely instead of using ? inside a closure that returns ().
+            let display = gdk::Display::default()
+                .ok_or_else(|| "Linux display is unavailable".to_string())?;
+            let clipboard = gtk::Clipboard::for_display(&display, &gdk::SELECTION_CLIPBOARD);
+            // owner-change 记录的是一次真实的复制所有权变化，因此重复复制相同文件或图片也能被识别，而不会只依赖内容哈希。
+            // owner-change records an actual clipboard ownership transition, so copying the same file or image again is detected instead of relying only on content hashes.
+            let _owner_change_handler = clipboard.connect_local("owner-change", false, |_| {
+                LINUX_CLIPBOARD_CHANGE_COUNT.fetch_add(1, Ordering::Relaxed);
+                None
+            });
+            *slot.borrow_mut() = Some(clipboard);
+        }
+        Ok(())
+    })?;
+    LINUX_CLIPBOARD_BRIDGE_READY.store(true, Ordering::Release);
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn read_linux_clipboard_snapshot(app: &AppHandle, settings: &AppSettings) -> Result<LinuxClipboardSnapshot, String> {
+    let arboard_result = read_linux_arboard_snapshot(settings);
+    let gtk_result = read_linux_gtk_snapshot(app, settings);
+
+    match (arboard_result, gtk_result) {
+        (Ok(arboard_snapshot), Ok(gtk_snapshot)) => Ok(merge_linux_clipboard_snapshots(arboard_snapshot, gtk_snapshot)),
+        (Ok(mut snapshot), Err(error)) => {
+            snapshot.diagnostics.push(format!("GTK probe unavailable: {}", error));
+            Ok(snapshot)
+        }
+        (Err(error), Ok(mut snapshot)) => {
+            snapshot.diagnostics.push(format!("arboard probe unavailable: {}", error));
+            Ok(snapshot)
+        }
+        (Err(arboard_error), Err(gtk_error)) => Err(format!(
+            "Linux clipboard probes failed; arboard: {}; GTK: {}",
+            arboard_error, gtk_error
+        )),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn merge_linux_clipboard_snapshots(
+    mut arboard_snapshot: LinuxClipboardSnapshot,
+    mut gtk_snapshot: LinuxClipboardSnapshot,
+) -> LinuxClipboardSnapshot {
+    // 两套后端按文件、图片、文本的优先级合并，是为了保留桌面环境提供的最完整数据，而不是让兼容文本覆盖真实对象。
+    // Both backends are merged with file, image, then text priority so the richest desktop payload wins instead of a compatibility string.
+    let arboard_priority = linux_content_priority(&arboard_snapshot.content);
+    let gtk_priority = linux_content_priority(&gtk_snapshot.content);
+    let content = if gtk_priority > arboard_priority {
+        gtk_snapshot.content
+    } else {
+        arboard_snapshot.content
+    };
+
+    arboard_snapshot.diagnostics.append(&mut gtk_snapshot.diagnostics);
+    LinuxClipboardSnapshot {
+        change_count: arboard_snapshot.change_count.max(gtk_snapshot.change_count),
+        content,
+        diagnostics: arboard_snapshot.diagnostics,
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_content_priority(content: &LinuxClipboardContent) -> u8 {
+    match content {
+        LinuxClipboardContent::Files(_) => 3,
+        LinuxClipboardContent::Image(_) => 2,
+        LinuxClipboardContent::Text(_) => 1,
+        LinuxClipboardContent::Empty => 0,
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_desired_content_priority(filters: LinuxClipboardFilters) -> u8 {
+    if filters.file {
+        3
+    } else if filters.image {
+        2
+    } else if filters.text {
+        1
+    } else {
+        0
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_snapshot_needs_non_text_retry(
+    snapshot: &LinuxClipboardSnapshot,
+    last_signature: &str,
+    filters: LinuxClipboardFilters,
+) -> bool {
+    let desired_priority = linux_desired_content_priority(filters);
+    desired_priority >= 2
+        && linux_content_priority(&snapshot.content) < desired_priority
+        && linux_snapshot_signature(snapshot) != last_signature
+}
+
+#[cfg(target_os = "linux")]
+fn read_linux_snapshot_after_change(
+    app: &AppHandle,
+    settings: &AppSettings,
+    last_signature: &str,
+) -> Result<LinuxClipboardSnapshot, String> {
+    let filters = LinuxClipboardFilters::from(settings);
+    let mut snapshot = read_linux_clipboard_snapshot(app, settings)?;
+    if !linux_snapshot_needs_non_text_retry(&snapshot, last_signature, filters) {
+        return Ok(snapshot);
+    }
+
+    // Linux 剪贴板所有者可能先发布兼容文本，随后才准备图片或文件字节；变化后短暂重协商可以避免把真实对象永久写成文本历史。
+    // A Linux clipboard owner may publish compatibility text before image or file bytes are ready; brief renegotiation after a change prevents the real object from being permanently stored as text history.
+    for _ in 0..LINUX_NON_TEXT_RETRY_COUNT {
+        thread::sleep(Duration::from_millis(LINUX_NON_TEXT_RETRY_DELAY_MS));
+        let retry = read_linux_clipboard_snapshot(app, settings)?;
+        snapshot = merge_linux_clipboard_snapshots(snapshot, retry);
+        if linux_content_priority(&snapshot.content) >= linux_desired_content_priority(filters) {
+            break;
+        }
+    }
+    Ok(snapshot)
+}
+
+#[cfg(target_os = "linux")]
+fn read_linux_arboard_snapshot(settings: &AppSettings) -> Result<LinuxClipboardSnapshot, String> {
+    // 读取端每轮建立短生命周期会话，是为了获取最新 Wayland data offer；写入端仍保留长生命周期对象以维持剪贴板所有权。
+    // Read polls use a short-lived session to receive the newest Wayland data offer, while writes keep the long-lived owner required by Linux clipboards.
     let mut clipboard = Clipboard::new().map_err(|error| error.to_string())?;
+    let mut diagnostics = Vec::new();
+
+    if settings.filter_file {
+        match clipboard.get().file_list() {
+            Ok(paths) => {
+                let normalized = paths
+                    .into_iter()
+                    .filter(|path| path.exists())
+                    .map(|path| path.to_string_lossy().to_string())
+                    .collect::<Vec<_>>();
+                if !normalized.is_empty() {
+                    return Ok(LinuxClipboardSnapshot {
+                        change_count: LINUX_CLIPBOARD_CHANGE_COUNT.load(Ordering::Relaxed),
+                        content: LinuxClipboardContent::Files(normalized),
+                        diagnostics,
+                    });
+                }
+            }
+            Err(error) if clipboard_content_unavailable(&error.to_string()) => {}
+            Err(error) => diagnostics.push(format!("arboard file list: {}", error)),
+        }
+    }
 
     if settings.filter_image {
-        if let Ok(image) = clipboard.get_image() {
-            let bytes = image.bytes.to_vec();
-            let signature = clipboard_change_signature(&content_hash_for_bytes("image", &bytes));
-            if signature != *last_signature {
-                *last_signature = signature;
-                let item = item_from_image(image, state)?;
-                process_item(app, state, &settings, item)?;
+        match clipboard.get_image() {
+            Ok(image) => {
+                return Ok(LinuxClipboardSnapshot {
+                    change_count: LINUX_CLIPBOARD_CHANGE_COUNT.load(Ordering::Relaxed),
+                    content: LinuxClipboardContent::Image(LinuxClipboardImage {
+                        width: image.width,
+                        height: image.height,
+                        bytes: image.bytes.into_owned(),
+                    }),
+                    diagnostics,
+                });
             }
+            Err(error) if clipboard_content_unavailable(&error.to_string()) => {}
+            Err(error) => diagnostics.push(format!("arboard image: {}", error)),
         }
     }
+
+    if settings.filter_file || settings.filter_text {
+        match clipboard.get_text() {
+            Ok(text) => {
+                if let Some(text) = normalize_clipboard_text(text) {
+                    if settings.filter_file {
+                        // 某些 GNOME/KDE 来源只通过文本通道暴露 URI 列表；解析后再决定类型可以避免把文件路径写成普通文本历史。
+                        // Some GNOME/KDE sources expose URI lists only through the text channel; parsing before classification prevents file paths from becoming plain-text history.
+                        let paths = parse_linux_file_payload(text.as_bytes());
+                        if !paths.is_empty() {
+                            return Ok(LinuxClipboardSnapshot {
+                                change_count: LINUX_CLIPBOARD_CHANGE_COUNT.load(Ordering::Relaxed),
+                                content: LinuxClipboardContent::Files(paths),
+                                diagnostics,
+                            });
+                        }
+                    }
+                    if settings.filter_text {
+                        return Ok(LinuxClipboardSnapshot {
+                            change_count: LINUX_CLIPBOARD_CHANGE_COUNT.load(Ordering::Relaxed),
+                            content: LinuxClipboardContent::Text(text),
+                            diagnostics,
+                        });
+                    }
+                }
+            }
+            Err(error) if clipboard_content_unavailable(&error.to_string()) => {}
+            Err(error) => diagnostics.push(format!("arboard text: {}", error)),
+        }
+    }
+
+    Ok(LinuxClipboardSnapshot {
+        change_count: LINUX_CLIPBOARD_CHANGE_COUNT.load(Ordering::Relaxed),
+        content: LinuxClipboardContent::Empty,
+        diagnostics,
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn read_linux_gtk_snapshot(app: &AppHandle, settings: &AppSettings) -> Result<LinuxClipboardSnapshot, String> {
+    ensure_linux_clipboard_bridge(app)?;
+    let filters = LinuxClipboardFilters::from(settings);
+    if gtk::is_initialized_main_thread() {
+        return read_linux_clipboard_snapshot_on_main_thread(filters);
+    }
+
+    let (sender, receiver) = mpsc::sync_channel(1);
+    app.run_on_main_thread(move || {
+        let result = catch_unwind(AssertUnwindSafe(|| read_linux_clipboard_snapshot_on_main_thread(filters)))
+            .map_err(|_| "GTK clipboard read panicked".to_string())
+            .and_then(|result| result);
+        let _ = sender.send(result);
+    }).map_err(|error| format!("Cannot schedule GTK clipboard read: {}", error))?;
+
+    receiver
+        .recv_timeout(Duration::from_secs(LINUX_CLIPBOARD_MAIN_THREAD_TIMEOUT_SECONDS))
+        .map_err(|error| format!("GTK clipboard read timed out: {}", error))?
+}
+
+#[cfg(target_os = "linux")]
+fn read_linux_clipboard_snapshot_on_main_thread(filters: LinuxClipboardFilters) -> Result<LinuxClipboardSnapshot, String> {
+    install_linux_clipboard_bridge_on_main_thread()?;
+    LINUX_CLIPBOARD_BRIDGE.with(|slot| {
+        let borrowed = slot.borrow();
+        let clipboard = borrowed.as_ref().ok_or_else(|| "GTK clipboard bridge is unavailable".to_string())?;
+        let advertised_targets = linux_clipboard_target_names(clipboard);
+        let mut diagnostics = Vec::new();
+
+        // 文件和图片优先于文本，是为了正确处理 Nautilus、截图工具和浏览器同时发布多种 MIME 表示的剪贴板内容。
+        // Files and images take priority over text so Nautilus, screenshot tools, and browsers that publish multiple MIME representations are classified by their real payload.
+        if filters.file {
+            match read_linux_file_paths(clipboard, &advertised_targets) {
+                Ok(paths) if !paths.is_empty() => {
+                    return Ok(LinuxClipboardSnapshot {
+                        change_count: LINUX_CLIPBOARD_CHANGE_COUNT.load(Ordering::Relaxed),
+                        content: LinuxClipboardContent::Files(paths),
+                        diagnostics,
+                    });
+                }
+                Ok(_) => {}
+                Err(error) => diagnostics.push(format!("file formats: {}", error)),
+            }
+        }
+
+        if filters.image {
+            match read_linux_image(clipboard, &advertised_targets) {
+                Ok(Some(image)) => {
+                    return Ok(LinuxClipboardSnapshot {
+                        change_count: LINUX_CLIPBOARD_CHANGE_COUNT.load(Ordering::Relaxed),
+                        content: LinuxClipboardContent::Image(image),
+                        diagnostics,
+                    });
+                }
+                Ok(None) => {}
+                Err(error) => diagnostics.push(format!("image formats: {}", error)),
+            }
+        }
+
+        if filters.text {
+            // 直接请求文本而不先调用 wait_is_text_available，是为了避免 Wayland 数据源在“探测”和“读取”之间切换 offer 时出现假阴性。
+            // Requesting text directly without a wait_is_text_available preflight avoids false negatives when a Wayland source changes its offer between probing and reading.
+            if let Some(text) = clipboard.wait_for_text().and_then(|value| normalize_clipboard_text(value.to_string())) {
+                return Ok(LinuxClipboardSnapshot {
+                    change_count: LINUX_CLIPBOARD_CHANGE_COUNT.load(Ordering::Relaxed),
+                    content: LinuxClipboardContent::Text(text),
+                    diagnostics,
+                });
+            }
+        }
+
+        if (filters.file || filters.image) && !advertised_targets.is_empty() {
+            diagnostics.push(format!(
+                "advertised targets without readable non-text payload: {}",
+                advertised_targets.iter().take(24).cloned().collect::<Vec<_>>().join(", ")
+            ));
+        }
+        Ok(LinuxClipboardSnapshot {
+            change_count: LINUX_CLIPBOARD_CHANGE_COUNT.load(Ordering::Relaxed),
+            content: LinuxClipboardContent::Empty,
+            diagnostics,
+        })
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn linux_clipboard_target_names(clipboard: &gtk::Clipboard) -> Vec<String> {
+    let mut names = clipboard
+        .wait_for_targets()
+        .unwrap_or_default()
+        .into_iter()
+        // Atom::name 在当前 GTK 绑定中直接返回 GString，并非 Option；直接转换可避免把字符串错误地当成可选值调用 map。
+        // Atom::name returns GString directly in the current GTK bindings rather than Option, so converting it directly avoids treating a string as an optional value.
+        .map(|target| target.name().to_string())
+        .filter(|name| !name.trim().is_empty())
+        .collect::<Vec<_>>();
+    names.sort_by_key(|name| name.to_ascii_lowercase());
+    names.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    names
+}
+
+#[cfg(target_os = "linux")]
+fn read_linux_file_paths(clipboard: &gtk::Clipboard, advertised_targets: &[String]) -> Result<Vec<String>, String> {
+    let direct_uris = clipboard.wait_for_uris().into_iter().map(|uri| uri.to_string());
+    let direct_paths = parse_linux_file_entries(direct_uris);
+    if !direct_paths.is_empty() {
+        return Ok(direct_paths);
+    }
+
+    // GNOME、KDE、Mozilla 与通用 FreeDesktop 文件管理器发布的目标名称并不完全一致，因此已知目标和动态枚举目标都需要读取。
+    // GNOME, KDE, Mozilla, and generic FreeDesktop file managers advertise different target names, so both known and dynamically discovered targets must be read.
+    const FILE_TARGETS: [&str; 6] = [
+        "x-special/gnome-copied-files",
+        "application/x-kde4-urilist",
+        "application/x-kde-urilist",
+        "text/uri-list",
+        "text/x-moz-url",
+        "text/x-moz-url-data",
+    ];
+    let mut target_names = FILE_TARGETS.iter().map(|value| value.to_string()).collect::<Vec<_>>();
+    for target in advertised_targets {
+        let normalized = target.to_ascii_lowercase();
+        if normalized.contains("uri-list")
+            || normalized.contains("copied-files")
+            || normalized.contains("file-list")
+            || normalized.contains("moz-url")
+        {
+            target_names.push(target.clone());
+        }
+    }
+    target_names.sort_by_key(|name| name.to_ascii_lowercase());
+    target_names.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+
+    let mut errors = Vec::new();
+    for target_name in target_names {
+        match read_linux_target_bytes(clipboard, &target_name) {
+            Ok(Some(bytes)) => {
+                let paths = parse_linux_file_payload(&bytes);
+                if !paths.is_empty() {
+                    return Ok(paths);
+                }
+            }
+            Ok(None) => {}
+            Err(error) => errors.push(format!("{}: {}", target_name, error)),
+        }
+    }
+    if errors.is_empty() {
+        Ok(Vec::new())
+    } else {
+        Err(errors.join("; "))
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn read_linux_target_bytes(clipboard: &gtk::Clipboard, target_name: &str) -> Result<Option<Vec<u8>>, String> {
+    let target = gdk::Atom::intern(target_name);
+    // Wayland 下 TARGETS 探测结果可能在真正请求数据前变化；直接请求目标比先 wait_is_target_available 再读取更可靠。
+    // Under Wayland the TARGETS result can change before data is requested, so requesting the target directly is more reliable than a wait_is_target_available preflight.
+    Ok(clipboard
+        .wait_for_contents(&target)
+        .map(|selection| selection.data())
+        .filter(|bytes| !bytes.is_empty()))
+}
+
+#[cfg(target_os = "linux")]
+fn parse_linux_file_payload(bytes: &[u8]) -> Vec<String> {
+    let payload = decode_linux_clipboard_string(bytes);
+    parse_linux_file_entries(
+        payload
+            .split(|character| matches!(character, '\r' | '\n' | '\0'))
+            .map(str::to_string),
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn decode_linux_clipboard_string(bytes: &[u8]) -> String {
+    if bytes.starts_with(&[0xff, 0xfe]) {
+        let units = bytes[2..]
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect::<Vec<_>>();
+        return String::from_utf16_lossy(&units);
+    }
+    if bytes.starts_with(&[0xfe, 0xff]) {
+        let units = bytes[2..]
+            .chunks_exact(2)
+            .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
+            .collect::<Vec<_>>();
+        return String::from_utf16_lossy(&units);
+    }
+
+    let zero_count = bytes.iter().filter(|byte| **byte == 0).count();
+    if bytes.len() >= 4 && zero_count * 4 >= bytes.len() {
+        // Mozilla 的 text/x-moz-url 在部分 Linux 桌面仍使用无 BOM 的 UTF-16LE；按零字节密度识别可避免把 URI 解码成乱码。
+        // Some Linux desktops still expose Mozilla text/x-moz-url as BOM-less UTF-16LE; detecting its zero-byte density prevents URI corruption.
+        let units = bytes
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect::<Vec<_>>();
+        return String::from_utf16_lossy(&units);
+    }
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+#[cfg(target_os = "linux")]
+fn parse_linux_file_entries(entries: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut paths = Vec::new();
+    for entry in entries {
+        let value = entry.trim_matches(|ch: char| ch.is_whitespace() || ch == '\0');
+        if value.is_empty()
+            || value.starts_with('#')
+            || value.eq_ignore_ascii_case("copy")
+            || value.eq_ignore_ascii_case("cut")
+        {
+            continue;
+        }
+
+        let path = if let Ok(uri) = Url::parse(value) {
+            if uri.scheme() != "file" {
+                continue;
+            }
+            match uri.to_file_path() {
+                Ok(path) => path,
+                Err(_) => continue,
+            }
+        } else {
+            let path = PathBuf::from(value);
+            if !path.is_absolute() {
+                continue;
+            }
+            path
+        };
+        if !path.exists() {
+            continue;
+        }
+        let normalized = path.to_string_lossy().to_string();
+        if seen.insert(normalized.clone()) {
+            paths.push(normalized);
+        }
+    }
+    paths
+}
+
+#[cfg(target_os = "linux")]
+fn read_linux_image(clipboard: &gtk::Clipboard, advertised_targets: &[String]) -> Result<Option<LinuxClipboardImage>, String> {
+    let mut errors = Vec::new();
+    // wait_for_image 自身会协商 GTK 支持的最佳图片格式；跳过可用性预检可避免 Wayland offer 瞬态变化导致图片被错误判空。
+    // wait_for_image negotiates GTK's best supported image format itself; skipping the availability preflight avoids false empties during transient Wayland offer changes.
+    if let Some(pixbuf) = clipboard.wait_for_image() {
+        match linux_pixbuf_to_image(&pixbuf) {
+            Ok(image) => return Ok(Some(image)),
+            Err(error) => errors.push(format!("GTK image conversion: {}", error)),
+        }
+    }
+
+    const IMAGE_TARGETS: [&str; 9] = [
+        "image/png",
+        "image/jpeg",
+        "image/jpg",
+        "image/webp",
+        "image/gif",
+        "image/bmp",
+        "image/x-bmp",
+        "image/tiff",
+        "image/x-tiff",
+    ];
+    let mut target_names = IMAGE_TARGETS.iter().map(|value| value.to_string()).collect::<Vec<_>>();
+    target_names.extend(
+        advertised_targets
+            .iter()
+            .filter(|target| target.to_ascii_lowercase().starts_with("image/"))
+            .cloned(),
+    );
+    target_names.sort_by_key(|name| image_target_priority(name));
+    target_names.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+
+    for target_name in target_names {
+        match read_linux_target_bytes(clipboard, &target_name) {
+            Ok(Some(bytes)) => match decode_linux_encoded_image(&bytes) {
+                Ok(image) => return Ok(Some(image)),
+                Err(error) => errors.push(format!("{}: {}", target_name, error)),
+            },
+            Ok(None) => {}
+            Err(error) => errors.push(format!("{}: {}", target_name, error)),
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(None)
+    } else {
+        Err(errors.join("; "))
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn image_target_priority(target: &str) -> (u8, String) {
+    let normalized = target.to_ascii_lowercase();
+    let priority = match normalized.as_str() {
+        "image/png" => 0,
+        "image/jpeg" | "image/jpg" => 1,
+        "image/webp" => 2,
+        "image/gif" => 3,
+        "image/bmp" | "image/x-bmp" => 4,
+        "image/tiff" | "image/x-tiff" => 5,
+        _ => 10,
+    };
+    (priority, normalized)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_pixbuf_to_image(pixbuf: &gdk_pixbuf::Pixbuf) -> Result<LinuxClipboardImage, String> {
+    if pixbuf.colorspace() != gdk_pixbuf::Colorspace::Rgb || pixbuf.bits_per_sample() != 8 {
+        return Err("unsupported pixbuf colorspace or sample depth".into());
+    }
+    let width = usize::try_from(pixbuf.width()).map_err(|_| "invalid pixbuf width".to_string())?;
+    let height = usize::try_from(pixbuf.height()).map_err(|_| "invalid pixbuf height".to_string())?;
+    let channels = usize::try_from(pixbuf.n_channels()).map_err(|_| "invalid pixbuf channel count".to_string())?;
+    let rowstride = usize::try_from(pixbuf.rowstride()).map_err(|_| "invalid pixbuf row stride".to_string())?;
+    let pixel_bytes = pixbuf.read_pixel_bytes();
+    let bytes = linux_packed_pixels_to_rgba(width, height, channels, rowstride, pixel_bytes.as_ref())?;
+    Ok(LinuxClipboardImage { width, height, bytes })
+}
+
+#[cfg(target_os = "linux")]
+fn linux_packed_pixels_to_rgba(
+    width: usize,
+    height: usize,
+    channels: usize,
+    rowstride: usize,
+    source: &[u8],
+) -> Result<Vec<u8>, String> {
+    if width == 0 || height == 0 || !matches!(channels, 3 | 4) {
+        return Err("invalid image dimensions or channel count".into());
+    }
+    let row_bytes = width.checked_mul(channels).ok_or_else(|| "image row size overflow".to_string())?;
+    if rowstride < row_bytes {
+        return Err("pixbuf row stride is smaller than one pixel row".into());
+    }
+    let required_source = rowstride
+        .checked_mul(height.saturating_sub(1))
+        .and_then(|prefix| prefix.checked_add(row_bytes))
+        .ok_or_else(|| "pixbuf source size overflow".to_string())?;
+    if source.len() < required_source {
+        return Err("pixbuf source data is truncated".into());
+    }
+    let output_len = width
+        .checked_mul(height)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| "decoded image size overflow".to_string())?;
+    if output_len > MAX_LINUX_DECODED_IMAGE_BYTES {
+        return Err("decoded image exceeds the safety limit".into());
+    }
+
+    let mut output = Vec::with_capacity(output_len);
+    for row in 0..height {
+        let start = row * rowstride;
+        let row_data = &source[start..start + row_bytes];
+        for pixel in row_data.chunks_exact(channels) {
+            output.extend_from_slice(&pixel[..3]);
+            output.push(if channels == 4 { pixel[3] } else { 255 });
+        }
+    }
+    Ok(output)
+}
+
+#[cfg(target_os = "linux")]
+fn decode_linux_encoded_image(bytes: &[u8]) -> Result<LinuxClipboardImage, String> {
+    if bytes.is_empty() || bytes.len() > MAX_LINUX_ENCODED_IMAGE_BYTES {
+        return Err("encoded image is empty or exceeds the safety limit".into());
+    }
+    let decoded = image::load_from_memory(bytes).map_err(|error| error.to_string())?;
+    let rgba = decoded.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    let output_len = usize::try_from(width)
+        .ok()
+        .and_then(|width| usize::try_from(height).ok().and_then(|height| width.checked_mul(height)))
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| "decoded image dimensions overflow".to_string())?;
+    if output_len > MAX_LINUX_DECODED_IMAGE_BYTES {
+        return Err("decoded image exceeds the safety limit".into());
+    }
+    Ok(LinuxClipboardImage {
+        width: width as usize,
+        height: height as usize,
+        bytes: rgba.into_raw(),
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn poll_linux_once(
+    app: &AppHandle,
+    state: &AppState,
+    settings: &AppSettings,
+    last_signature: &mut String,
+) -> Result<(), String> {
+    // 文件管理器和截图工具的非文本 MIME 往往晚于兼容文本就绪，因此变化轮次必须完成短暂重协商后才能最终分类。
+    // File managers and screenshot tools often make non-text MIME data ready after compatibility text, so a changed poll must briefly renegotiate before final classification.
+    let snapshot = read_linux_snapshot_after_change(app, settings, last_signature)?;
+    log_linux_clipboard_diagnostics(state, &snapshot.diagnostics);
+    let signature = linux_snapshot_signature(&snapshot);
+    if signature == *last_signature {
+        return Ok(());
+    }
+    *last_signature = signature;
+
+    let item = match snapshot.content {
+        LinuxClipboardContent::Files(paths) => Some(item_from_files(paths)),
+        LinuxClipboardContent::Image(image) => {
+            let data = ImageData {
+                width: image.width,
+                height: image.height,
+                bytes: Cow::Owned(image.bytes),
+            };
+            Some(item_from_image(data, state)?)
+        }
+        LinuxClipboardContent::Text(text) => Some(item_from_text(text, settings)),
+        LinuxClipboardContent::Empty => None,
+    };
+    if let Some(item) = item {
+        process_item(app, state, settings, item)?;
+    }
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn linux_snapshot_signature(snapshot: &LinuxClipboardSnapshot) -> String {
+    let content_hash = match &snapshot.content {
+        LinuxClipboardContent::Files(paths) => content_hash_for_paths(paths),
+        LinuxClipboardContent::Image(image) => content_hash_for_bytes("image", &image.bytes),
+        LinuxClipboardContent::Text(text) => content_hash_for_bytes("text", text.as_bytes()),
+        LinuxClipboardContent::Empty => "empty".into(),
+    };
+    format!("linux-change:{}:{}", snapshot.change_count, content_hash)
+}
+
+#[cfg(target_os = "linux")]
+fn log_linux_clipboard_diagnostics(state: &AppState, diagnostics: &[String]) {
+    let current = diagnostics.join(" | ");
+    let guard = LAST_LINUX_DIAGNOSTIC.get_or_init(|| Mutex::new(String::new())).lock();
+    if let Ok(mut previous) = guard {
+        if *previous == current {
+            return;
+        }
+        *previous = current.clone();
+        if !current.is_empty() {
+            // 诊断只记录 MIME 与转换错误，不记录任何剪贴板正文，便于定位桌面环境兼容问题而不泄露用户内容。
+            // Diagnostics record only MIME/conversion failures and never clipboard payloads, enabling desktop compatibility debugging without exposing user content.
+            app_log::warn(&state.paths, "clipboard", format!("linux native clipboard fallback details: {}", current));
+        }
+    }
 }
 
 fn process_item(app: &AppHandle, state: &AppState, settings: &AppSettings, item: ClipItem) -> Result<(), String> {
@@ -617,6 +1465,7 @@ fn item_from_image(image: ImageData<'_>, state: &AppState) -> Result<ClipItem, S
     })
 }
 
+#[cfg(not(target_os = "linux"))]
 fn read_clipboard_text() -> Result<Option<String>, String> {
     #[cfg(target_os = "windows")]
     {
@@ -624,9 +1473,34 @@ fn read_clipboard_text() -> Result<Option<String>, String> {
             return Ok(Some(text));
         }
     }
-    match Clipboard::new().and_then(|mut clipboard| clipboard.get_text()) {
-        Ok(text) => Ok(Some(text)),
-        Err(_) => Ok(None),
+
+    let mut last_error = None;
+    for attempt in 0..4 {
+        match with_system_clipboard(|clipboard| clipboard.get_text()) {
+            Ok(text) => return Ok(normalize_clipboard_text(text)),
+            Err(error) if clipboard_content_unavailable(&error) => {
+                if attempt == 3 {
+                    return Ok(None);
+                }
+            }
+            Err(error) => last_error = Some(error),
+        }
+        // Wayland 数据源可能在复制动作后短暂延迟提供 MIME 数据；轻量重试可覆盖该窗口，同时不显著阻塞监听线程。
+        // A Wayland source may briefly delay serving MIME data after a copy action; short retries cover that gap without materially blocking the monitor.
+        thread::sleep(Duration::from_millis(25));
+    }
+    match last_error {
+        Some(error) => Err(error),
+        None => Ok(None),
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn read_clipboard_image() -> Result<Option<ImageData<'static>>, String> {
+    match with_system_clipboard(|clipboard| clipboard.get_image()) {
+        Ok(image) => Ok(Some(image)),
+        Err(error) if clipboard_content_unavailable(&error) => Ok(None),
+        Err(error) => Err(error),
     }
 }
 
@@ -727,7 +1601,6 @@ unsafe fn read_windows_html_text_from_open_clipboard() -> Option<String> {
     parse_windows_html_clipboard(&data)
 }
 
-#[cfg(target_os = "windows")]
 fn normalize_clipboard_text(text: String) -> Option<String> {
     let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
     if normalized.trim().is_empty() { None } else { Some(normalized) }
@@ -803,6 +1676,12 @@ fn normalize_clipboard_path(line: &str) -> Option<String> {
     if value.is_empty() {
         return None;
     }
+    #[cfg(target_os = "linux")]
+    if value.starts_with("file:") {
+        // Linux 文件 URI 必须通过标准解析器转换，否则直接裁剪 file:/// 会把绝对路径的根斜杠一起删除。
+        // Linux file URIs must be converted through the standard parser because trimming file:/// directly also removes the leading slash of an absolute path.
+        return Url::parse(&value).ok()?.to_file_path().ok().map(|path| path.to_string_lossy().to_string());
+    }
     if let Some(rest) = value.strip_prefix("file:///") {
         value = rest.to_string();
     } else if let Some(rest) = value.strip_prefix("file://") {
@@ -855,11 +1734,6 @@ fn read_file_paths_from_clipboard() -> Result<Vec<String>, String> {
     crate::macos_native::read_file_paths_from_pasteboard()
 }
 
-#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-fn read_file_paths_from_clipboard() -> Result<Vec<String>, String> {
-    Ok(Vec::new())
-}
-
 pub fn content_hash_for_bytes(prefix: &str, bytes: &[u8]) -> String {
     let mut hash = 0xcbf29ce484222325u64;
     for byte in prefix.as_bytes().iter().chain(bytes.iter()) {
@@ -875,6 +1749,9 @@ pub fn content_hash_for_paths(paths: &[String]) -> String {
     content_hash_for_bytes("file", paths.join("\u{1f}").as_bytes())
 }
 
+// Linux 使用包含原生 change count 的独立快照签名；只在其他平台编译此函数，可避免生成永远不会被调用的符号与 dead_code 警告。
+// Linux uses a dedicated snapshot signature with the native change count; compiling this helper only elsewhere avoids unreachable symbols and dead_code warnings.
+#[cfg(not(target_os = "linux"))]
 fn clipboard_change_signature(content_hash: &str) -> String {
     #[cfg(target_os = "windows")]
     {
@@ -910,18 +1787,17 @@ fn human_size(bytes: i64) -> String {
 pub fn copy_to_clipboard(record: &HistoryRecord) -> Result<(), String> {
     match record.kind {
         ClipKind::Image => {
-            let mut clipboard = Clipboard::new().map_err(|error| error.to_string())?;
             let path = record.image_path.as_ref().ok_or_else(|| "Image path is missing".to_string())?;
             let (width, height, bytes) = read_image_rgba_for_clipboard(path)?;
             let data = ImageData { width: width as usize, height: height as usize, bytes: Cow::Owned(bytes) };
-            clipboard.set_image(data).map_err(|error| error.to_string())?;
+            with_system_clipboard(|clipboard| clipboard.set_image(data))?;
         }
         ClipKind::File => {
             copy_file_paths_to_clipboard(&record.file_paths)?;
         }
         _ => {
-            let mut clipboard = Clipboard::new().map_err(|error| error.to_string())?;
-            clipboard.set_text(record.text_content.clone().unwrap_or_else(|| record.summary.clone())).map_err(|error| error.to_string())?;
+            let text = record.text_content.clone().unwrap_or_else(|| record.summary.clone());
+            with_system_clipboard(|clipboard| clipboard.set_text(text))?;
         }
     }
     Ok(())
@@ -1056,8 +1932,100 @@ fn copy_file_paths_to_clipboard(paths: &[String]) -> Result<(), String> {
 
 #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
 fn copy_file_paths_to_clipboard(paths: &[String]) -> Result<(), String> {
-    let mut clipboard = Clipboard::new().map_err(|error| error.to_string())?;
-    // Linux 暂时回退到路径文本，是为了在未接入各桌面环境文件 MIME 格式前仍保持 Copy 可用。
-    // Linux temporarily falls back to path text so Copy remains usable before desktop-specific file MIME formats are added.
-    clipboard.set_text(paths.join("\n")).map_err(|error| error.to_string())
+    let valid_paths = paths
+        .iter()
+        .map(Path::new)
+        .filter(|path| path.exists())
+        .collect::<Vec<_>>();
+    if valid_paths.is_empty() {
+        return Err("No valid files to copy".into());
+    }
+    // Linux 通过 arboard 的文件列表 MIME 写入真实文件对象，避免文件管理器只收到不可操作的路径文本。
+    // Linux writes real file-list MIME data through arboard so file managers receive pasteable objects instead of inert path text.
+    with_system_clipboard(|clipboard| clipboard.set().file_list(&valid_paths))
+}
+
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_clipboard_tests {
+    use super::*;
+
+    #[test]
+    fn parses_gnome_file_payload_with_crlf_and_encoded_spaces() {
+        let root = std::env::temp_dir().join(format!("clipanchor-linux-clipboard-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("temporary directory should be created");
+        let file = root.join("sample image.png");
+        fs::write(&file, b"test").expect("temporary file should be written");
+        let uri = Url::from_file_path(&file).expect("temporary file should convert to URI");
+        let payload = format!("copy\r\n{}\r\n{}\r\n", uri, uri);
+
+        let paths = parse_linux_file_payload(payload.as_bytes());
+        assert_eq!(paths, vec![file.to_string_lossy().to_string()]);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn converts_padded_rgb_rows_to_rgba() {
+        let source = [
+            10, 20, 30, 40, 50, 60, 0, 0,
+            70, 80, 90, 100, 110, 120, 0, 0,
+        ];
+        let rgba = linux_packed_pixels_to_rgba(2, 2, 3, 8, &source).expect("RGB pixbuf should convert");
+        assert_eq!(
+            rgba,
+            vec![
+                10, 20, 30, 255, 40, 50, 60, 255,
+                70, 80, 90, 255, 100, 110, 120, 255,
+            ]
+        );
+    }
+
+    #[test]
+    fn preserves_rgba_alpha_channel() {
+        let source = [10, 20, 30, 40, 50, 60, 70, 80];
+        let rgba = linux_packed_pixels_to_rgba(2, 1, 4, 8, &source).expect("RGBA pixbuf should convert");
+        assert_eq!(rgba, source);
+    }
+
+    #[test]
+    fn retries_when_new_compatibility_text_may_hide_a_file() {
+        let snapshot = LinuxClipboardSnapshot {
+            change_count: 8,
+            content: LinuxClipboardContent::Text("sample.png".into()),
+            diagnostics: Vec::new(),
+        };
+        let filters = LinuxClipboardFilters { text: true, image: true, file: true };
+        assert!(linux_snapshot_needs_non_text_retry(&snapshot, "linux-change:7:old", filters));
+    }
+
+    #[test]
+    fn merged_snapshot_keeps_the_richer_non_text_payload() {
+        let text = LinuxClipboardSnapshot {
+            change_count: 9,
+            content: LinuxClipboardContent::Text("fallback".into()),
+            diagnostics: vec!["text first".into()],
+        };
+        let image = LinuxClipboardSnapshot {
+            change_count: 9,
+            content: LinuxClipboardContent::Image(LinuxClipboardImage {
+                width: 1,
+                height: 1,
+                bytes: vec![1, 2, 3, 255],
+            }),
+            diagnostics: vec!["image ready".into()],
+        };
+        let merged = merge_linux_clipboard_snapshots(text, image);
+        assert!(matches!(merged.content, LinuxClipboardContent::Image(_)));
+        assert_eq!(merged.diagnostics.len(), 2);
+    }
+
+    #[test]
+    fn file_uri_conversion_preserves_the_absolute_root() {
+        let root = std::env::temp_dir().join(format!("clipanchor-linux-uri-{}", Uuid::new_v4()));
+        fs::write(&root, b"test").expect("temporary file should be written");
+        let uri = Url::from_file_path(&root).expect("temporary path should convert to URI");
+        let normalized = normalize_clipboard_path(uri.as_str()).expect("file URI should normalize");
+        assert_eq!(normalized, root.to_string_lossy().to_string());
+        let _ = fs::remove_file(root);
+    }
 }
