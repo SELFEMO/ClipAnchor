@@ -231,6 +231,8 @@ pub fn sync_shortcuts(app: &AppHandle, shortcuts: &ShortcutSettings) -> Result<(
 
         #[cfg(target_os = "windows")]
         {
+            // Windows 原生注册失败后由轮询后备继续提供快捷键，因此这里必须把后备成功启动视为同步成功，避免返回一个永远不可达的错误分支。
+            // Windows keeps shortcuts available through the polling fallback after native registration fails, so starting that fallback is a successful sync and must not leave an unreachable error branch.
             ensure_windows_keyboard_fallback(app.clone());
             if let Some(state) = app.try_state::<crate::models::AppState>() {
                 app_log::warn(
@@ -242,10 +244,15 @@ pub fn sync_shortcuts(app: &AppHandle, shortcuts: &ShortcutSettings) -> Result<(
                     ),
                 );
             }
-            return Ok(());
+            Ok(())
         }
 
-        Err(errors.join("; "))
+        #[cfg(not(target_os = "windows"))]
+        {
+            // 其他非 Linux 平台没有 Windows 轮询后备，必须把注册错误返回给调用方，避免界面误以为快捷键已经可用。
+            // Other non-Linux platforms do not have the Windows polling fallback, so registration errors must reach the caller instead of letting the UI assume shortcuts are active.
+            Err(errors.join("; "))
+        }
     }
 }
 

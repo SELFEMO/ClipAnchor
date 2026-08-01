@@ -211,6 +211,13 @@ fn unix_now() -> i64 {
 
 
 fn initial_signature(app: &AppHandle, state: &AppState) -> Result<String, String> {
+    #[cfg(not(target_os = "linux"))]
+    {
+        // 保留跨平台统一的函数签名可以让监听线程共享同一调用路径；非 Linux 后端不需要窗口句柄，因此显式消费参数以保持零警告构建。
+        // Keeping one cross-platform signature lets the monitor thread share the same call path; non-Linux backends do not need the app handle, so it is explicitly consumed for warning-free builds.
+        let _ = app;
+    }
+
     let settings = state.settings.lock().map_err(|error| error.to_string())?.clone();
     // 启动监听时先记录当前剪贴板指纹，是为了避免把启动前已经存在的内容误认为新复制并弹窗。
     // The monitor records the existing clipboard signature on startup so pre-existing clipboard content is not mistaken for a new copy.
