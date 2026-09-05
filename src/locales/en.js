@@ -188,7 +188,7 @@ const language = {
     "updateAssetUnavailableDetail": "",
     "updateFailedTitle": "Update was not completed",
     "updateFailedMessage": "The update check could not be completed.",
-    "updateFailedDetail": "Check your network and try again.",
+    "updateFailedDetail": "Check your network and try again. You can also inspect data/logs/windows-update.log next to the app.",
     "updateInstallNow": "Install now",
     "updateLater": "Later",
     "updatePleaseWait": "Please wait…",

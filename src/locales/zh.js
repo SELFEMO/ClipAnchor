@@ -188,7 +188,7 @@ const language = {
     "updateAssetUnavailableDetail": "",
     "updateFailedTitle": "更新未完成",
     "updateFailedMessage": "更新检查未能完成。",
-    "updateFailedDetail": "请检查网络后重试。",
+    "updateFailedDetail": "请检查网络后重试。也可查看程序目录 data/logs/windows-update.log。",
     "updateInstallNow": "立即更新",
     "updateLater": "稍后提醒",
     "updatePleaseWait": "请稍候…",

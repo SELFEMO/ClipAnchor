@@ -1,6 +1,6 @@
 {
   "name": "clipanchor",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,7 +13,8 @@
     "desktop:build:macos-x64": "node scripts/tauri-build.mjs --target x86_64-apple-darwin && node scripts/collect-release.mjs --target x86_64-apple-darwin",
     "desktop:build:windows-x64": "node scripts/tauri-build.mjs --target x86_64-pc-windows-msvc && node scripts/collect-release.mjs --target x86_64-pc-windows-msvc",
     "desktop:build:linux-x64": "node scripts/tauri-build.mjs --target x86_64-unknown-linux-gnu && node scripts/collect-release.mjs --target x86_64-unknown-linux-gnu",
-    "clean": "node scripts/clean.mjs"
+    "clean": "node scripts/clean.mjs",
+    "version:sync": "node scripts/app-version.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.11.1",

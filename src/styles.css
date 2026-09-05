@@ -580,9 +580,9 @@ h1 {
   grid-template-columns: 1fr;
   gap: 8px;
   padding: 12px;
-  border: 1px solid var(--line);
+  border: 1px solid color-mix(in srgb, var(--line) 86%, transparent);
   border-radius: 14px;
-  background: rgba(0, 0, 0, .08);
+  background: color-mix(in srgb, var(--surface) 58%, transparent);
 }
 input, select {
   width: 100%;

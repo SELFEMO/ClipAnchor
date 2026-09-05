@@ -5,6 +5,7 @@ import { mkdir, readFile, readdir, stat, utimes, writeFile } from 'node:fs/promi
 import { join, relative } from 'node:path';
 import { resolveNodeBinary } from './node-tool.mjs';
 import { ensureCargoLock, ensureRustToolchain } from './toolchain.mjs';
+import { syncNpmPackageVersion } from './app-version.mjs';
 
 const host = '127.0.0.1';
 const preferredPort = 1420;
@@ -153,6 +154,7 @@ async function main() {
 
   ensureRustToolchain();
   ensureCargoLock();
+  syncNpmPackageVersion();
   await ensureRustSourcesTriggerRebuild();
   const port = await chooseDevPort();
   const devUrl = `http://${host}:${port}`;

@@ -1,6 +1,5 @@
 {
   "productName": "ClipAnchor",
-  "version": "0.7.0",
   "identifier": "com.clipanchor.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",

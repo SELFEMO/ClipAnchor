@@ -3,10 +3,12 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveNodeBinary } from './node-tool.mjs';
 import { ensureCargoLock, ensureRustToolchain } from './toolchain.mjs';
+import { syncNpmPackageVersion } from './app-version.mjs';
 
 function main() {
   ensureRustToolchain();
   ensureCargoLock();
+  syncNpmPackageVersion();
   const targetIndex = process.argv.indexOf('--target');
   const targetTriple = targetIndex >= 0 ? process.argv[targetIndex + 1] : '';
   const normalizedTarget = String(targetTriple).toLowerCase();

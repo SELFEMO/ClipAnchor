@@ -1,4 +1,6 @@
 use crate::{app_log, models::UpdateStatusPayload, paths::DataPaths, update_trust};
+#[cfg(target_os = "windows")]
+use crate::fs_guard;
 use chrono::{SecondsFormat, Utc};
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter};
@@ -129,8 +131,67 @@ pub fn startup_background_check(app: &AppHandle, paths: &DataPaths, started_in_l
     checking
 }
 
+fn reconcile_stale_installing_status(
+    mut status: UpdateStatusPayload,
+    current_version: &str,
+    log_text: &str,
+    package_still_present: bool,
+) -> UpdateStatusPayload {
+    if status.status != "installing" {
+        return status;
+    }
+    status.current_version = Some(current_version.to_string());
+    if let Some(latest) = status.latest_version.as_deref() {
+        if compare_versions(current_version, latest) != Ordering::Less {
+            status.status = "idle".into();
+            status.update_available = false;
+            status.update_failed = false;
+            status.install_ready = false;
+            status.attention_required = false;
+            status.prompt_on_main_open = false;
+            status.message = Some("windows_install_succeeded".into());
+            return status;
+        }
+    }
+    let apply_failed = log_text.contains("Windows update apply failed");
+    let apply_finished = log_text.contains("Windows update apply script finished");
+    if apply_failed || apply_finished {
+        status.status = "update_failed".into();
+        status.update_failed = true;
+        status.attention_required = true;
+        status.prompt_on_main_open = false;
+        status.update_available = true;
+        status.install_ready = package_still_present;
+        status.message = Some("windows_install_did_not_replace_running_app".into());
+    }
+    status
+}
+
 pub fn main_open_check(paths: &DataPaths) -> UpdateStatusPayload {
     let mut status = read_status(paths).unwrap_or_else(|| idle_status("main_open"));
+    if status.status == "installing" {
+        let log_text = fs::read_to_string(paths.logs.join("windows-update.log")).unwrap_or_default();
+        let package_still_present = status
+            .downloaded_path
+            .as_deref()
+            .map(|path| Path::new(path).is_file())
+            .unwrap_or(false);
+        let reconciled = reconcile_stale_installing_status(
+            status,
+            &current_version(),
+            &log_text,
+            package_still_present,
+        );
+        if reconciled.status != "installing" {
+            let _ = save_status(paths, &reconciled);
+            app_log::info(
+                paths,
+                "update",
+                format!("stale installing status reconciled to {}", reconciled.status),
+            );
+        }
+        status = reconciled;
+    }
     if status.prompt_on_main_open {
         if is_promptable_update(&status) {
             // 返回给当前主窗口的副本保留提示位，但磁盘状态立即消费该标记，从根源上避免每次激活主窗口都再次弹出同一更新。
@@ -238,7 +299,8 @@ fn install_downloaded_update_once(app: &AppHandle, paths: &DataPaths) -> Result<
         return Err("Update download metadata is incomplete".into());
     }
     let package = update_trust::trusted_update_package_path(paths, &local_path, &expected_hash)?;
-    let quit_after_launch = open_installer_path(app, paths, &package)?;
+    let expected_version = status.latest_version.clone().unwrap_or_else(current_version);
+    let quit_after_launch = open_installer_path(app, paths, &package, &expected_version)?;
 
     // 只有独立覆盖脚本真正接管时才进入 installing；系统包管理器或发布页仅被打开时仍保留可安装状态，避免界面永久卡在忙碌态。
     // The state becomes installing only after a detached replacement helper takes over; opening a package manager or release page keeps the update installable instead of leaving the UI permanently busy.
@@ -503,6 +565,22 @@ fn update_asset_cache_name(asset: &GitHubAsset) -> String {
     format!("{:016x}-{}", hash, safe_asset_name(&asset.name))
 }
 
+fn published_installer_file_name(path: &Path) -> String {
+    let name = path
+        .file_name()
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "ClipAnchor.msi".into());
+    const PREFIX_LEN: usize = 16;
+    if name.len() > PREFIX_LEN + 1
+        && name.as_bytes()[PREFIX_LEN] == b'-'
+        && name[..PREFIX_LEN].bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        name[PREFIX_LEN + 1..].to_string()
+    } else {
+        name
+    }
+}
+
 fn download_asset(paths: &DataPaths, asset: &GitHubAsset, expected_sha256: Option<&str>) -> Result<(PathBuf, String), String> {
     // 缓存按资产 URL 指纹、服务端大小和 SHA-256 共同验证，是为了复用完整包，同时避免零字节、中断文件或被替换的安装包被当成可安装更新。
     // Cache reuse validates the asset URL fingerprint, server size, and SHA-256 so complete packages are reused while empty, interrupted, or swapped files cannot be treated as installable.
@@ -652,14 +730,18 @@ fn configure_silent_child_process(command: &mut Command) {
     }
 }
 
-fn open_installer_path(app: &AppHandle, paths: &DataPaths, path: &Path) -> Result<bool, String> {
+fn open_installer_path(app: &AppHandle, paths: &DataPaths, path: &Path, expected_version: &str) -> Result<bool, String> {
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = expected_version;
+    }
     #[cfg(not(target_os = "macos"))]
     {
         let _ = app;
     }
     #[cfg(target_os = "windows")]
     {
-        install_windows_package_update(paths, path)?;
+        install_windows_package_update(paths, path, expected_version)?;
         return Ok(true);
     }
 
@@ -785,7 +867,13 @@ fi
 }
 
 #[cfg(target_os = "windows")]
-fn install_windows_package_update(paths: &DataPaths, installer_path: &Path) -> Result<(), String> {
+fn win32_usable_path(path: &Path) -> PathBuf {
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    fs_guard::strip_verbatim_prefix(&canonical)
+}
+
+#[cfg(target_os = "windows")]
+fn install_windows_package_update(paths: &DataPaths, installer_path: &Path, expected_version: &str) -> Result<(), String> {
     let extension = installer_path
         .extension()
         .and_then(|value| value.to_str())
@@ -795,16 +883,16 @@ fn install_windows_package_update(paths: &DataPaths, installer_path: &Path) -> R
         return Err("Windows update package must be an EXE or MSI installer".into());
     }
 
-    let installer_path = installer_path.canonicalize().unwrap_or_else(|_| installer_path.to_path_buf());
+    let installer_path = win32_usable_path(installer_path);
     let update_dir = paths.data.join(UPDATE_DIR);
     fs::create_dir_all(&update_dir).map_err(|error| error.to_string())?;
     let script_path = update_dir.join("apply_windows_update.ps1");
-    let log_path = paths.logs.join("windows-update.log");
-    let current_exe = std::env::current_exe().map_err(|error| error.to_string())?;
+    let log_path = win32_usable_path(&paths.logs.join("windows-update.log"));
+    let current_exe = win32_usable_path(&std::env::current_exe().map_err(|error| error.to_string())?);
 
     fs::write(
         &script_path,
-        windows_installer_script(&installer_path, &current_exe, &log_path, std::process::id()),
+        windows_installer_script(&installer_path, &current_exe, &log_path, std::process::id(), expected_version),
     )
     .map_err(|error| error.to_string())?;
 
@@ -824,33 +912,66 @@ fn install_windows_package_update(paths: &DataPaths, installer_path: &Path) -> R
 }
 
 #[cfg(target_os = "windows")]
-fn windows_installer_script(installer_path: &Path, current_exe: &Path, log_path: &Path, app_pid: u32) -> String {
+fn windows_installer_script(
+    installer_path: &Path,
+    current_exe: &Path,
+    log_path: &Path,
+    app_pid: u32,
+    expected_version: &str,
+) -> String {
     format!(
         r###"
 $ErrorActionPreference = 'Stop'
 $InstallerPath = {installer}
+$InstallerPackageName = {installer_name}
 $CurrentExe = {current_exe}
 $LogFile = {log_file}
+$ExpectedVersion = {expected_version}
 $AppPid = {pid}
 $InstallerExtension = [System.IO.Path]::GetExtension($InstallerPath).TrimStart('.').ToLowerInvariant()
 $ProcessName = [System.IO.Path]::GetFileNameWithoutExtension($CurrentExe)
+$MsiLogFile = Join-Path (Split-Path -Parent $LogFile) 'windows-msiexec.log'
 function Write-UpdateLog([string]$Message) {{
   $directory = Split-Path -Parent $LogFile
   if ($directory -and -not (Test-Path -LiteralPath $directory)) {{ New-Item -ItemType Directory -Force -Path $directory | Out-Null }}
   Add-Content -LiteralPath $LogFile -Encoding UTF8 -Value "$(Get-Date -Format o) $Message"
 }}
+function Normalize-Version([string]$Value) {{
+  if (-not $Value) {{ return '' }}
+  $parts = [System.Collections.Generic.List[string]]::new()
+  foreach ($part in ($Value.TrimStart('v','V') -split '[^\d]+')) {{
+    if ($part -ne '') {{ $parts.Add($part) }}
+  }}
+  while ($parts.Count -gt 1 -and $parts[$parts.Count - 1] -eq '0') {{
+    $parts.RemoveAt($parts.Count - 1)
+  }}
+  return ($parts -join '.')
+}}
+function Get-ExeVersion([string]$Path) {{
+  try {{
+    $info = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($Path)
+    $raw = $info.ProductVersion
+    if (-not $raw) {{ $raw = $info.FileVersion }}
+    return Normalize-Version $raw
+  }} catch {{
+    return ''
+  }}
+}}
 function Find-RestartExe {{
   $candidates = New-Object System.Collections.Generic.List[string]
-  if ($CurrentExe) {{ $candidates.Add($CurrentExe) }}
   $roots = @($env:ProgramFiles, ${{env:ProgramFiles(x86)}}, (Join-Path $env:LOCALAPPDATA 'Programs'), $env:LOCALAPPDATA) | Where-Object {{ $_ -and $_.Trim() -ne '' }}
   foreach ($root in $roots) {{
     $candidates.Add((Join-Path $root 'ClipAnchor\clipanchor.exe'))
     $candidates.Add((Join-Path $root 'ClipAnchor\ClipAnchor.exe'))
   }}
+  if ($CurrentExe) {{ $candidates.Add($CurrentExe) }}
+  $expected = Normalize-Version $ExpectedVersion
   foreach ($candidate in $candidates) {{
-    if ($candidate -and (Test-Path -LiteralPath $candidate)) {{ return $candidate }}
+    if ($candidate -and (Test-Path -LiteralPath $candidate) -and ((Get-ExeVersion $candidate) -eq $expected)) {{
+      return $candidate
+    }}
   }}
-  return $CurrentExe
+  return $null
 }}
 function Wait-ForClipAnchorExit {{
   if ($AppPid -gt 0) {{
@@ -874,6 +995,22 @@ function Quote-ProcessArg([string]$Value) {{
   if ($Value -notmatch '[\s"]') {{ return $Value }}
   return '"' + ($Value -replace '"', '\"') + '"'
 }}
+function Resolve-Win32Path([string]$Path) {{
+  if ($Path.StartsWith('\\?\UNC\')) {{ return '\\' + $Path.Substring(8) }}
+  if ($Path.StartsWith('\\?\')) {{ return $Path.Substring(4) }}
+  return $Path
+}}
+function Copy-InstallerForWindowsInstaller([string]$Source, [string]$PackageName) {{
+  $source = Resolve-Win32Path $Source
+  if (-not (Test-Path -LiteralPath $source)) {{ throw "installer not found: $source" }}
+  $name = if ($PackageName) {{ $PackageName }} else {{ [System.IO.Path]::GetFileName($source) }}
+  $staging = Join-Path $env:TEMP ('ClipAnchor-update-' + [guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Force -Path $staging | Out-Null
+  $dest = Join-Path $staging $name
+  Copy-Item -LiteralPath $source -Destination $dest -Force
+  Write-UpdateLog "staged installer at $dest"
+  return $dest
+}}
 function Start-ElevatedAndWait([string]$FilePath, [string[]]$Arguments) {{
   $argumentLine = ($Arguments | ForEach-Object {{ Quote-ProcessArg $_ }}) -join ' '
   Write-UpdateLog "starting installer: $FilePath $argumentLine"
@@ -888,10 +1025,11 @@ function Start-ElevatedAndWait([string]$FilePath, [string[]]$Arguments) {{
 }}
 try {{
   Write-UpdateLog 'Windows update apply script started'
-  if (-not (Test-Path -LiteralPath $InstallerPath)) {{ throw "installer not found: $InstallerPath" }}
+  $InstallerPath = Copy-InstallerForWindowsInstaller $InstallerPath $InstallerPackageName
+  $InstallerExtension = [System.IO.Path]::GetExtension($InstallerPath).TrimStart('.').ToLowerInvariant()
   Wait-ForClipAnchorExit
   if ($InstallerExtension -eq 'msi') {{
-    $exitCode = Start-ElevatedAndWait "$env:SystemRoot\System32\msiexec.exe" @('/i', $InstallerPath, '/qn', '/norestart')
+    $exitCode = Start-ElevatedAndWait "$env:SystemRoot\System32\msiexec.exe" @('/i', $InstallerPath, '/qn', '/norestart', '/l*v', $MsiLogFile)
   }} elseif ($InstallerExtension -eq 'exe') {{
     $exitCode = Start-ElevatedAndWait $InstallerPath @('/S')
   }} else {{
@@ -901,18 +1039,20 @@ try {{
   if (@(0, 3010, 1641) -notcontains $exitCode) {{ throw "installer failed with exit code $exitCode" }}
   Start-Sleep -Seconds 2
   $restartExe = Find-RestartExe
-  if (-not $restartExe -or -not (Test-Path -LiteralPath $restartExe)) {{ throw "cannot locate ClipAnchor executable to restart" }}
+  if (-not $restartExe -or -not (Test-Path -LiteralPath $restartExe)) {{ throw "cannot locate ClipAnchor $ExpectedVersion executable to restart" }}
   Write-UpdateLog "restarting ClipAnchor from $restartExe"
-  Start-Process -FilePath $restartExe -ArgumentList @('--portable') | Out-Null
+  Start-Process -FilePath $restartExe | Out-Null
   Write-UpdateLog 'Windows update apply script finished'
 }} catch {{
   Write-UpdateLog "Windows update apply failed: $($_.Exception.Message)"
   exit 1
 }}
 "###,
-        installer = powershell_literal(&installer_path.to_string_lossy()),
-        current_exe = powershell_literal(&current_exe.to_string_lossy()),
-        log_file = powershell_literal(&log_path.to_string_lossy()),
+        installer = powershell_literal(&fs_guard::strip_verbatim_prefix(installer_path).to_string_lossy()),
+        installer_name = powershell_literal(&published_installer_file_name(installer_path)),
+        current_exe = powershell_literal(&fs_guard::strip_verbatim_prefix(current_exe).to_string_lossy()),
+        log_file = powershell_literal(&fs_guard::strip_verbatim_prefix(log_path).to_string_lossy()),
+        expected_version = powershell_literal(expected_version),
         pid = app_pid,
     )
 }
@@ -1406,4 +1546,119 @@ fn save_status(paths: &DataPaths, status: &UpdateStatusPayload) -> Result<(), St
 
 fn status_path(paths: &DataPaths) -> PathBuf {
     paths.data.join(UPDATE_STATUS_FILE)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::UpdateStatusPayload;
+
+    fn installing_status(latest: &str) -> UpdateStatusPayload {
+        let mut status = UpdateStatusPayload::default();
+        status.status = "installing".into();
+        status.latest_version = Some(latest.into());
+        status.install_ready = true;
+        status.update_available = true;
+        status
+    }
+
+    #[test]
+    fn reconcile_leaves_non_installing_status_unchanged() {
+        let mut status = UpdateStatusPayload::default();
+        status.status = "downloaded".into();
+        let reconciled = reconcile_stale_installing_status(status.clone(), "0.7.0", "Windows update apply failed", true);
+        assert_eq!(reconciled.status, "downloaded");
+    }
+
+    #[test]
+    fn reconcile_marks_install_success_when_current_version_matches() {
+        let reconciled = reconcile_stale_installing_status(installing_status("0.7.1"), "0.7.1", "", false);
+        assert_eq!(reconciled.status, "idle");
+        assert!(!reconciled.update_available);
+        assert!(!reconciled.install_ready);
+        assert!(!reconciled.attention_required);
+    }
+
+    #[test]
+    fn reconcile_marks_failure_when_apply_log_failed() {
+        let reconciled = reconcile_stale_installing_status(
+            installing_status("0.7.1"),
+            "0.7.0",
+            "Windows update apply failed: installer failed with exit code 1619",
+            true,
+        );
+        assert_eq!(reconciled.status, "update_failed");
+        assert!(reconciled.update_failed);
+        assert!(reconciled.attention_required);
+        assert!(reconciled.install_ready);
+        assert!(reconciled.update_available);
+    }
+
+    #[test]
+    fn reconcile_marks_failure_when_script_finished_but_app_still_old() {
+        let reconciled = reconcile_stale_installing_status(
+            installing_status("0.7.1"),
+            "0.7.0",
+            "Windows update apply script finished",
+            true,
+        );
+        assert_eq!(reconciled.status, "update_failed");
+        assert!(reconciled.install_ready);
+    }
+
+    #[test]
+    fn reconcile_keeps_installing_when_log_is_incomplete() {
+        let reconciled = reconcile_stale_installing_status(installing_status("0.7.1"), "0.7.0", "Windows update apply script started", true);
+        assert_eq!(reconciled.status, "installing");
+    }
+
+    #[test]
+    fn published_installer_file_name_strips_update_cache_prefix() {
+        assert_eq!(
+            published_installer_file_name(Path::new(
+                r"D:\ClipAnchor\data\updates\00ec86e14365294b-ClipAnchor_windows_x64_zh-CN.msi"
+            )),
+            "ClipAnchor_windows_x64_zh-CN.msi"
+        );
+        assert_eq!(
+            published_installer_file_name(Path::new(r"D:\ClipAnchor\data\updates\ClipAnchor.msi")),
+            "ClipAnchor.msi"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_installer_script_uses_win32_path_and_versioned_restart() {
+        let installer = Path::new(
+            r"\\?\D:\ClipAnchor\data\updates\00ec86e14365294b-ClipAnchor_windows_x64_zh-CN.msi",
+        );
+        let current_exe = Path::new(r"\\?\D:\portable\clipanchor.exe");
+        let log_path = Path::new(r"\\?\D:\ClipAnchor\data\logs\windows-update.log");
+        let script = windows_installer_script(installer, current_exe, log_path, 4242, "0.7.1");
+        assert!(script.contains(
+            r"D:\ClipAnchor\data\updates\00ec86e14365294b-ClipAnchor_windows_x64_zh-CN.msi"
+        ));
+        assert!(script.contains("$InstallerPackageName = 'ClipAnchor_windows_x64_zh-CN.msi'"));
+        assert!(script.contains("/l*v"));
+        assert!(script.contains("windows-msiexec.log"));
+        assert!(script.contains("0.7.1"));
+        assert!(!script.contains("--portable"));
+        assert!(script.contains("Get-ExeVersion"));
+        assert!(script.contains("Copy-InstallerForWindowsInstaller"));
+        assert!(script.contains("$env:TEMP"));
+        let installer_line = script
+            .lines()
+            .find(|line| line.trim_start().starts_with("$InstallerPath = '"))
+            .unwrap();
+        let current_line = script.lines().find(|line| line.contains("$CurrentExe =")).unwrap();
+        assert!(!installer_line.contains("\\\\?\\"));
+        assert!(!current_line.contains("\\\\?\\"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn win32_usable_path_strips_verbatim_prefix_without_existing_file() {
+        let stripped = win32_usable_path(Path::new(r"\\?\D:\missing\ClipAnchor.msi"));
+        assert_eq!(stripped, PathBuf::from(r"D:\missing\ClipAnchor.msi"));
+    }
 }

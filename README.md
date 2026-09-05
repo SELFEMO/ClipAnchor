@@ -333,7 +333,7 @@ A complete package under `data/updates/` is reused only when its release-asset f
 | `src/index.html` | Vite entry for the desktop application. Production builds emit `dist/index.html` for the Tauri main and popup windows. |
 | `src/` | React frontend, including the main shell, Clipboard page, Settings page, popup page, API wrapper, localization, hooks, and global styles. |
 | `src/locales/` | Built-in English and Simplified Chinese message sources. |
-| `src-tauri/` | Rust/Tauri backend for clipboard monitoring, database access, tray, autostart, shortcuts, single instance, updates, and window control. |
+| `src-tauri/` | Rust/Tauri backend for clipboard monitoring, database access, tray, autostart, shortcuts, single instance, updates, and window control. The product version is set only in `src-tauri/Cargo.toml`; installers inherit it, and npm package files are synced from it. |
 | `data/` | Portable runtime data for the database, settings, language packs, resources, exports, updates, and logs. |
 | `docs/index.html` | Standalone website for GitHub Pages or static hosting; it is not part of the desktop runtime. |
 | `docs/i18n/` | Public extension-language documentation and JSON template. |

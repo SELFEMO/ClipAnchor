@@ -7,12 +7,14 @@ use std::{
 pub const MAX_HISTORY_IMPORT_BYTES: u64 = 50 * 1024 * 1024;
 pub const MAX_HISTORY_IMPORT_RECORDS: usize = 20_000;
 
-fn strip_verbatim_prefix(path: &Path) -> PathBuf {
+pub(crate) fn strip_verbatim_prefix(path: &Path) -> PathBuf {
     let text = path.to_string_lossy();
-    // Windows canonicalize 会加上 \\?\ 前缀；比较 containment 前去掉它，避免同一路径因前缀不同而误判越界。
-    // Windows canonicalize adds a \\?\ prefix; stripping it before containment checks prevents false rejections of the same path.
-    if let Some(stripped) = text.strip_prefix(r"\\?\") {
-        PathBuf::from(stripped)
+    // Windows canonicalize 会加上 \\?\ 或 \\?\UNC\ 前缀；msiexec 和路径包含判断都需要普通 Win32 路径。
+    // Windows canonicalize adds a \\?\ or \\?\UNC\ prefix; msiexec and containment checks both need ordinary Win32 paths.
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{rest}"))
+    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+        PathBuf::from(rest)
     } else {
         path.to_path_buf()
     }
@@ -183,5 +185,25 @@ mod tests {
         assert!(assert_import_record_count(1).is_ok());
         assert!(assert_import_record_count(MAX_HISTORY_IMPORT_RECORDS).is_ok());
         assert!(assert_import_record_count(MAX_HISTORY_IMPORT_RECORDS + 1).is_err());
+    }
+
+    #[test]
+    fn strip_verbatim_prefix_removes_extended_length_prefix() {
+        assert_eq!(
+            strip_verbatim_prefix(Path::new(r"\\?\D:\updates\ClipAnchor.msi")),
+            PathBuf::from(r"D:\updates\ClipAnchor.msi")
+        );
+        assert_eq!(
+            strip_verbatim_prefix(Path::new(r"D:\updates\ClipAnchor.msi")),
+            PathBuf::from(r"D:\updates\ClipAnchor.msi")
+        );
+    }
+
+    #[test]
+    fn strip_verbatim_prefix_rewrites_unc_extended_paths() {
+        assert_eq!(
+            strip_verbatim_prefix(Path::new(r"\\?\UNC\server\share\ClipAnchor.msi")),
+            PathBuf::from(r"\\server\share\ClipAnchor.msi")
+        );
     }
 }

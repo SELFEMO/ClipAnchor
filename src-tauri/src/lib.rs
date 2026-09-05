@@ -23,6 +23,9 @@ mod update_trust;
 mod window_control;
 mod window_shape;
 
+#[cfg(test)]
+mod version_source;
+
 use commands::*;
 use models::AppState;
 use tauri::{Manager, RunEvent, WindowEvent};

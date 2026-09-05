@@ -333,7 +333,7 @@ ClipAnchor 会处理用户复制的文本、图片和文件路径。
 | `src/index.html` | 主应用的 Vite 入口。构建后输出 `dist/index.html`，供 Tauri 主窗口和弹窗加载。 |
 | `src/` | React 前端，包括主界面、剪贴板页、设置页、弹窗页、接口封装、多语言、Hooks 和全局样式。 |
 | `src/locales/` | 内置英文与简体中文界面文案。 |
-| `src-tauri/` | Rust/Tauri 后端，包括剪贴板监听、数据库、托盘、自启动、快捷键、单实例、更新和窗口控制。 |
+| `src-tauri/` | Rust/Tauri 后端，包括剪贴板监听、数据库、托盘、自启动、快捷键、单实例、更新和窗口控制。产品版本只写在 `src-tauri/Cargo.toml`；安装包继承该版本，npm 包版本也从这里同步。 |
 | `data/` | 便携运行数据目录，用于保存数据库、设置、语言包、资源、导出文件、更新包和日志。 |
 | `docs/index.html` | 独立官网页面，用于 GitHub Pages 或静态托管，不参与桌面应用运行。 |
 | `docs/i18n/` | 可公开发布的扩展语言包说明与 JSON 模板。 |
