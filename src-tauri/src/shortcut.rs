@@ -29,6 +29,7 @@ pub(crate) enum ShortcutAction {
     ToggleMainWindow,
     EnterLightMode,
     ToggleThemeMode,
+    ToggleClipboardPause,
 }
 
 impl ShortcutAction {
@@ -40,6 +41,7 @@ impl ShortcutAction {
             Self::ToggleMainWindow => "toggle-main-window",
             Self::EnterLightMode => "enter-light-mode",
             Self::ToggleThemeMode => "toggle-theme-mode",
+            Self::ToggleClipboardPause => "toggle-clipboard-pause",
         }
     }
 
@@ -102,6 +104,7 @@ pub(crate) fn action_from_cli_id(value: &str) -> Option<ShortcutAction> {
         "toggle-main-window" => Some(ShortcutAction::ToggleMainWindow),
         "enter-light-mode" => Some(ShortcutAction::EnterLightMode),
         "toggle-theme-mode" => Some(ShortcutAction::ToggleThemeMode),
+        "toggle-clipboard-pause" => Some(ShortcutAction::ToggleClipboardPause),
         _ => None,
     }
 }
@@ -204,6 +207,7 @@ pub fn sync_shortcuts(app: &AppHandle, shortcuts: &ShortcutSettings) -> Result<(
             &shortcuts.toggle_main_window,
             &shortcuts.enter_light_mode,
             &shortcuts.toggle_theme_mode,
+            &shortcuts.toggle_clipboard_pause,
         ];
 
         let mut errors = Vec::new();
@@ -353,6 +357,8 @@ fn action_for_pressed_shortcut(shortcuts: &ShortcutSettings, pressed: &Shortcut)
         Some(ShortcutAction::EnterLightMode)
     } else if shortcut_matches(&shortcuts.toggle_theme_mode, pressed) {
         Some(ShortcutAction::ToggleThemeMode)
+    } else if shortcut_matches(&shortcuts.toggle_clipboard_pause, pressed) {
+        Some(ShortcutAction::ToggleClipboardPause)
     } else {
         None
     }
@@ -375,6 +381,7 @@ fn handle_action(app: &AppHandle, state: &crate::models::AppState, action: Short
         ShortcutAction::ToggleMainWindow => return toggle_main_window(app),
         ShortcutAction::EnterLightMode => return hide_main_window(app),
         ShortcutAction::ToggleThemeMode => {}
+        ShortcutAction::ToggleClipboardPause => {}
         ShortcutAction::TogglePinService | ShortcutAction::ToggleHistoryService => {}
     }
 
@@ -387,6 +394,9 @@ fn handle_action(app: &AppHandle, state: &crate::models::AppState, action: Short
             // The shortcut toggles only between dark and light so the result is immediately visible and avoids ambiguous system-theme feedback.
             settings_guard.theme = if settings_guard.theme == "light" { "dark".into() } else { "light".into() };
         }
+        ShortcutAction::ToggleClipboardPause => {
+            settings_guard.clipboard_paused = !settings_guard.clipboard_paused;
+        }
         ShortcutAction::ToggleMainWindow | ShortcutAction::EnterLightMode => {}
     }
 
@@ -395,7 +405,8 @@ fn handle_action(app: &AppHandle, state: &crate::models::AppState, action: Short
     drop(settings_guard);
     // 快捷键修改的是后台真实状态，必须立即广播给前端，否则侧栏状态会滞后并让用户误以为快捷键没有生效。
     // Shortcuts mutate backend state directly, so the update is broadcast immediately to prevent the sidebar from looking stale.
-    let _ = app.emit("clipanchor-settings-changed", updated);
+    let _ = app.emit("clipanchor-settings-changed", updated.clone());
+    let _ = crate::tray::refresh_tray(app);
     Ok(())
 }
 
@@ -470,13 +481,14 @@ fn canonical_shortcut_token(token: &str) -> String {
 }
 
 
-fn shortcut_entries(shortcuts: &ShortcutSettings) -> [(&'static str, &str); 5] {
+fn shortcut_entries(shortcuts: &ShortcutSettings) -> [(&'static str, &str); 6] {
     [
         ("toggle_pin_service", shortcuts.toggle_pin_service.as_str()),
         ("toggle_history_service", shortcuts.toggle_history_service.as_str()),
         ("toggle_main_window", shortcuts.toggle_main_window.as_str()),
         ("enter_light_mode", shortcuts.enter_light_mode.as_str()),
         ("toggle_theme_mode", shortcuts.toggle_theme_mode.as_str()),
+        ("toggle_clipboard_pause", shortcuts.toggle_clipboard_pause.as_str()),
     ]
 }
 
@@ -659,13 +671,14 @@ fn gtk_binding_to_canonical(value: &str) -> Option<String> {
 }
 
 #[cfg(target_os = "linux")]
-fn linux_shortcut_actions() -> [ShortcutAction; 5] {
+fn linux_shortcut_actions() -> [ShortcutAction; 6] {
     [
         ShortcutAction::TogglePinService,
         ShortcutAction::ToggleHistoryService,
         ShortcutAction::ToggleMainWindow,
         ShortcutAction::EnterLightMode,
         ShortcutAction::ToggleThemeMode,
+        ShortcutAction::ToggleClipboardPause,
     ]
 }
 
@@ -1057,6 +1070,11 @@ fn sync_linux_desktop_shortcuts(
             ShortcutAction::ToggleThemeMode,
             "ClipAnchor: Toggle theme",
             shortcuts.toggle_theme_mode.as_str(),
+        ),
+        (
+            ShortcutAction::ToggleClipboardPause,
+            "ClipAnchor: Pause clipboard listening",
+            shortcuts.toggle_clipboard_pause.as_str(),
         ),
     ];
 
@@ -1499,6 +1517,7 @@ fn ensure_windows_keyboard_fallback(app: AppHandle) {
                 (ShortcutAction::ToggleMainWindow, settings_snapshot.shortcuts.toggle_main_window.as_str()),
                 (ShortcutAction::EnterLightMode, settings_snapshot.shortcuts.enter_light_mode.as_str()),
                 (ShortcutAction::ToggleThemeMode, settings_snapshot.shortcuts.toggle_theme_mode.as_str()),
+                (ShortcutAction::ToggleClipboardPause, settings_snapshot.shortcuts.toggle_clipboard_pause.as_str()),
             ];
             let mut currently_down = HashSet::new();
             for (action, shortcut) in candidates {
@@ -1578,5 +1597,26 @@ fn key_code_from_name(name: &str) -> Option<i32> {
         "RIGHT" | "ARROWRIGHT" => Some(0x27),
         _ if upper.starts_with('F') => upper[1..].parse::<i32>().ok().filter(|n| (1..=24).contains(n)).map(|n| 0x70 + n - 1),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::ShortcutSettings;
+
+    #[test]
+    fn accepts_unique_default_shortcuts_including_pause() {
+        let shortcuts = ShortcutSettings::default();
+        assert_eq!(shortcuts.toggle_clipboard_pause, "Ctrl+Shift+S");
+        assert!(validate_shortcut_settings(&shortcuts).is_ok());
+    }
+
+    #[test]
+    fn rejects_duplicate_pause_and_theme_shortcuts() {
+        let mut shortcuts = ShortcutSettings::default();
+        shortcuts.toggle_clipboard_pause = shortcuts.toggle_theme_mode.clone();
+        let error = validate_shortcut_settings(&shortcuts).unwrap_err();
+        assert!(error.to_ascii_lowercase().contains("conflict"));
     }
 }

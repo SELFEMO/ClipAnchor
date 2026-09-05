@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { Copy, FileIcon, ImageIcon, Pencil, Pin, Star, Type, X } from 'lucide-react';
 import { api } from '../api.js';
 import { createTranslator, getReferenceMessages } from '../i18n.js';
+import { safeImageSrc } from '../safeImageSrc.js';
 import { resolveThemeClass, useDocumentThemeSync, useSystemThemePreference } from '../theme.js';
 import { useTransientScrollbar } from '../useTransientScrollbar.js';
 
@@ -139,7 +140,7 @@ export default function PopupWindow({ id }) {
     api.getPopupItem(id).then((payload) => {
       setItem(payload);
       setPinned(Boolean(payload.is_pinned));
-      setFavorited(Boolean(payload.is_pinned));
+      setFavorited(Boolean(payload.is_favorited));
       setDraftText(payload.text_content || payload.summary || '');
       if (payload.kind === 'image') {
         api.readImageDataUrl(id).then((src) => setImageSrc(src || '')).catch(() => setImageSrc(''));
@@ -245,6 +246,7 @@ export default function PopupWindow({ id }) {
   const motionClass = settings.animation_mode === 'performance' ? 'motion-performance' : 'motion-elegant';
   const actionsVisible = !confirmUnpinOpen && (!settings.auto_hide_actions || hover);
   const isTextItem = item.kind === 'text';
+  const imageUrl = safeImageSrc(imageSrc);
   const hasFilePreview = item.kind === 'file' && filePreviews.length > 0;
   const visibleFilePreviews = hasFilePreview ? filePreviews : [];
   const fileCount = item.kind === 'file' ? (item.file_paths?.length || filePreviews.length || 0) : 0;
@@ -340,14 +342,14 @@ export default function PopupWindow({ id }) {
               <button className="popup-close" onClick={requestHeaderClose} title={t('close') || 'Close'} aria-label={t('close') || 'Close'}><X size={13} /></button>
             </div>
           </div>
-          {item.kind === 'image' && imageSrc ? <img src={imageSrc} alt="clipboard" /> : null}
+          {item.kind === 'image' && imageUrl ? <img src={imageUrl} alt="clipboard" /> : null}
           {hasFilePreview ? (
             <>
               <div className="popup-file-count">{item.summary || `${fileCount} ${t('file')}`} · {fileCount} {t('itemCount')}</div>
               <div ref={fileListRef} className={`popup-file-list scroll-area ${filePreviews.length > 1 ? 'multi' : ''}`}>
                 {visibleFilePreviews.map((file, index) => (
                   <div className="popup-file-row" key={`${file.path}-${index}`} title={file.path || file.name}>
-                    {file.thumbnail_data_url ? <img src={file.thumbnail_data_url} alt={file.name} /> : <span>{file.is_image ? <ImageIcon size={17} /> : <FileIcon size={17} />}</span>}
+                    {safeImageSrc(file.thumbnail_data_url) ? <img src={safeImageSrc(file.thumbnail_data_url)} alt={file.name} /> : <span>{file.is_image ? <ImageIcon size={17} /> : <FileIcon size={17} />}</span>}
                     <em>{file.name}</em>
                   </div>
                 ))}

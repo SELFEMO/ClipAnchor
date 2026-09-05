@@ -180,7 +180,6 @@ ClipAnchor 内置英文和简体中文，其他语言可通过本地 JSON 扩展
 - 英文原始文案与权威键名：[`src/locales/en.js`](src/locales/en.js)
 - 公开 JSON 模板：[`docs/i18n/language-pack.template.json`](docs/i18n/language-pack.template.json)
 - 详细翻译说明：[`docs/i18n/README.md`](docs/i18n/README.md)
-- 可选校验脚本：[`scripts/validate-language-pack.mjs`](scripts/validate-language-pack.mjs)
 
 请复制 `src/locales/en.js` 中 `messages` 对象的键名，只翻译值，不要翻译、删除或随意修改键名。
 
@@ -248,16 +247,6 @@ data/locales/
 ```
 
 返回 ClipAnchor 设置页，点击“打开语言目录”右侧的“刷新语言包”。后端会立即重新扫描当前 `data/locales/`，无需退出托盘进程或重启软件。
-
-### 校验语言包
-
-在项目根目录执行：
-
-```bash
-node scripts/validate-language-pack.mjs data/locales/fr.json
-```
-
-校验脚本会检查文件名、JSON 结构、缺失项、英文原文变化项、人工修改译文和已删除键。
 
 ### 增量更新判断
 
@@ -331,11 +320,11 @@ ClipAnchor 会处理用户复制的文本、图片和文件路径。
 
 更新包会自动选择：
 
-- Windows 优先使用 `ClipAnchor_Windows_x64.exe`；若没有 EXE，则选择匹配系统语言的 MSI，例如 `ClipAnchor_Windows_x64_zh-CN.msi` 或 `ClipAnchor_Windows_x64_en-US.msi`；
+- Windows 优先选择 MSI（例如 `ClipAnchor_Windows_x64.msi`），因为静默覆盖安装需要标准参数和退出码；EXE 仍作为兼容兜底。
 - macOS 使用 DMG，并根据文件名过滤架构，Apple Silicon 会选择 ARM64 或 universal 包，不会误选 Intel-only 包；
 - Linux 根据发行版家族选择 DEB 或 RPM。
 
-若 `data/updates/` 中已有资产 URL 指纹与服务端预期大小均一致的完整安装包，才会直接复用。新包先写入同目录临时文件，校验完成后再重命名，并在新包可用后清理旧安装包。用户点击 **立即更新** 后，后端通过独立平台脚本交接安装，并在支持的平台上于覆盖成功后重启 ClipAnchor。
+若 `data/updates/` 中已有资产 URL 指纹、服务端预期大小和 SHA-256 均一致的完整安装包，才会直接复用。下载只允许 HTTPS GitHub 主机，并先写入同目录临时文件再重命名。用户点击 **立即更新** 时，安装路径必须位于 `data/updates/` 且与下载元数据一致；后端再通过独立平台脚本交接安装，并在支持的平台上于覆盖成功后重启 ClipAnchor。
 
 ## 项目结构
 

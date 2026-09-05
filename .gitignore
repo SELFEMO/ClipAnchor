@@ -66,14 +66,29 @@ logs/
 *.mobileprovision
 *.provisionprofile
 
-# Editor and OS files
+# Editor / AI tool directories are local workspace state, not ClipAnchor product source.
+# Committing them would upload editor and agent config to GitHub.
+# 编辑器与 AI 工具目录只是本机工作区状态，不是 ClipAnchor 产品源码。
+# 提交这些目录会把编辑器和 Agent 配置推到 GitHub。
+.cursor/
+.vscode/
+.claude/
+.windsurf/
+.codex/
+.idea/
+.continue/
+.aider/
+.gemini/
+.agent/
+.agents/
+.augment/
+.zed/
+.fleet/
+
+# OS files
 .DS_Store
 Thumbs.db
 desktop.ini
-.idea/
-.vscode/*
-!.vscode/extensions.json
-!.vscode/settings.json
 *.swp
 *.swo
 

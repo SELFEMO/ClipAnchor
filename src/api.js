@@ -1,5 +1,4 @@
 import { invoke } from '@tauri-apps/api/core';
-import { open, save } from '@tauri-apps/plugin-dialog';
 
 export const api = {
   bootstrap: () => invoke('get_bootstrap'),
@@ -24,31 +23,12 @@ export const api = {
   checkShortcutConflicts: (shortcuts) => invoke('check_shortcut_conflicts', { shortcuts }),
   setPinService: (enabled) => invoke('set_pin_service', { enabled }),
   setHistoryService: (enabled) => invoke('set_history_service', { enabled }),
-  setPrivacyMode: (enabled) => invoke('set_privacy_mode', { enabled }),
   setPrivacyFilterMode: (mode) => invoke('set_privacy_filter_mode', { mode }),
+  setClipboardPaused: (paused) => invoke('set_clipboard_paused', { paused }),
   setAutostart: (enabled) => invoke('set_autostart', { enabled }),
-  openPositionOverlay: () => invoke('open_position_overlay'),
   savePopupPosition: (x, y) => invoke('save_popup_position', { x, y }),
-  exportHistory: async (format = 'json') => {
-    const extension = format === 'csv' ? 'csv' : 'json';
-    const selected = await save({
-      title: format === 'csv' ? 'Export ClipAnchor CSV history' : 'Export ClipAnchor JSON history',
-      defaultPath: `clipanchor-history.${extension}`,
-      filters: [{ name: format === 'csv' ? 'ClipAnchor CSV history' : 'ClipAnchor JSON history', extensions: [extension] }]
-    });
-    if (!selected) return null;
-    return invoke('export_history_to_path', { format, outputPath: selected });
-  },
-  importHistory: async (format = 'json') => {
-    const extension = format === 'csv' ? 'csv' : 'json';
-    const selected = await open({
-      title: format === 'csv' ? 'Import ClipAnchor CSV history' : 'Import ClipAnchor JSON history',
-      multiple: false,
-      filters: [{ name: format === 'csv' ? 'ClipAnchor CSV history' : 'ClipAnchor JSON history', extensions: [extension] }]
-    });
-    if (!selected) return null;
-    return invoke('import_history_from_path', { format, inputPath: selected });
-  },
+  exportHistory: (format = 'json') => invoke('export_history', { format }),
+  importHistory: (format = 'json') => invoke('import_history', { format }),
   getUpdateStatus: () => invoke('get_update_status'),
   checkUpdate: (source = 'manual') => invoke('check_update', { source }),
   installDownloadedUpdate: () => invoke('install_downloaded_update'),

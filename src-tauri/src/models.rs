@@ -25,19 +25,8 @@ pub struct ClipItem {
     pub is_pinned: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct HistoryRecord {
-    pub id: String,
-    pub kind: ClipKind,
-    pub summary: String,
-    pub text_content: Option<String>,
-    pub image_path: Option<String>,
-    pub file_paths: Vec<String>,
-    pub bytes: i64,
-    pub created_at: String,
-    pub content_hash: String,
-    pub is_pinned: bool,
-}
+pub type ClipRecord = ClipItem;
+pub type HistoryRecord = ClipRecord;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -47,6 +36,7 @@ pub struct ShortcutSettings {
     pub toggle_main_window: String,
     pub enter_light_mode: String,
     pub toggle_theme_mode: String,
+    pub toggle_clipboard_pause: String,
 }
 
 impl Default for ShortcutSettings {
@@ -57,6 +47,7 @@ impl Default for ShortcutSettings {
             toggle_main_window: "Ctrl+Shift+X".into(),
             enter_light_mode: "Ctrl+Shift+L".into(),
             toggle_theme_mode: "Ctrl+Shift+T".into(),
+            toggle_clipboard_pause: "Ctrl+Shift+S".into(),
         }
     }
 }
@@ -74,12 +65,12 @@ pub struct ShortcutConflictPayload {
 pub struct AppSettings {
     pub pin_service_enabled: bool,
     pub history_service_enabled: bool,
+    pub clipboard_paused: bool,
     pub privacy_mode: bool,
     pub privacy_filter_mode: String,
     pub auto_start: bool,
     pub locale: String,
     pub theme: String,
-    pub scale: String,
     pub ui_scale_percent: u32,
     pub light_mode_minutes: u64,
     pub auto_hide_actions: bool,
@@ -98,6 +89,8 @@ pub struct AppSettings {
     pub auto_update_enabled: bool,
     pub translation_api_provider: String,
     pub translation_api_url: String,
+    /// 内存中的当前服务商密钥副本；落盘只保留 `translation_api_keys`。
+    /// In-memory copy of the active provider key; disk storage keeps `translation_api_keys` only.
     pub translation_api_key: String,
     pub translation_api_keys: HashMap<String, String>,
     pub shortcuts: ShortcutSettings,
@@ -108,17 +101,17 @@ impl Default for AppSettings {
         Self {
             pin_service_enabled: true,
             history_service_enabled: true,
+            clipboard_paused: false,
             privacy_mode: false,
-            privacy_filter_mode: "light".into(),
+            privacy_filter_mode: "off".into(),
             auto_start: false,
             locale: "auto".into(),
             theme: "system".into(),
-            scale: "medium".into(),
             ui_scale_percent: 100,
             light_mode_minutes: 5,
             auto_hide_actions: true,
-            auto_destroy_seconds: 10,
-            animation_mode: "performance".into(),
+            auto_destroy_seconds: 3,
+            animation_mode: "elegant".into(),
             popup_x: 24.0,
             popup_y: 24.0,
             popup_width: 340.0,
@@ -159,6 +152,8 @@ pub struct UpdateStatusPayload {
     pub asset_name: Option<String>,
     pub asset_url: Option<String>,
     pub downloaded_path: Option<String>,
+    pub package_sha256: Option<String>,
+    pub asset_url_fingerprint: Option<String>,
     pub total_bytes: Option<u64>,
     pub downloaded_bytes: Option<u64>,
     pub install_ready: bool,
@@ -184,6 +179,8 @@ impl Default for UpdateStatusPayload {
             asset_name: None,
             asset_url: None,
             downloaded_path: None,
+            package_sha256: None,
+            asset_url_fingerprint: None,
             total_bytes: None,
             downloaded_bytes: None,
             install_ready: false,

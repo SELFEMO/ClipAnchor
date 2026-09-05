@@ -34,6 +34,29 @@ pub fn activate_main_window(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
+pub fn main_window_hwnd<R: tauri::Runtime>(app: &AppHandle<R>) -> Option<windows_sys::Win32::Foundation::HWND> {
+    native_window_hwnd(app.get_webview_window("main").as_ref()?)
+}
+
+#[cfg(target_os = "windows")]
+pub fn native_window_hwnd<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> Option<windows_sys::Win32::Foundation::HWND> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use std::ffi::c_void;
+    use windows_sys::Win32::Foundation::HWND;
+
+    let handle = window.window_handle().ok()?;
+    let RawWindowHandle::Win32(win32) = handle.as_raw() else {
+        return None;
+    };
+    let hwnd = win32.hwnd.get() as *mut c_void as HWND;
+    if hwnd.is_null() {
+        None
+    } else {
+        Some(hwnd)
+    }
+}
+
 pub fn hide_main_window(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
         // 统一隐藏入口，是为了让快捷键、托盘和窗口关闭都进入相同的后台轻量状态。
@@ -52,26 +75,14 @@ pub fn hide_main_window(app: &AppHandle) -> Result<(), String> {
 
 #[cfg(target_os = "windows")]
 fn native_activate_window<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    use std::ffi::c_void;
-    use windows_sys::Win32::{
-        Foundation::HWND,
-        UI::WindowsAndMessaging::{
-            BringWindowToTop, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_TOP, SWP_NOMOVE,
-            SWP_NOSIZE, SWP_SHOWWINDOW, SW_RESTORE, SW_SHOW,
-        },
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        BringWindowToTop, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_TOP, SWP_NOMOVE,
+        SWP_NOSIZE, SWP_SHOWWINDOW, SW_RESTORE, SW_SHOW,
     };
 
-    let Ok(handle) = window.window_handle() else {
+    let Some(hwnd) = native_window_hwnd(window) else {
         return;
     };
-    let RawWindowHandle::Win32(win32) = handle.as_raw() else {
-        return;
-    };
-    let hwnd = win32.hwnd.get() as *mut c_void as HWND;
-    if hwnd.is_null() {
-        return;
-    }
 
     // Windows 对后台程序抢前台有额外限制；组合使用 ShowWindow/SetForegroundWindow 可以修复托盘菜单或快捷键只显示不置前的问题。
     // Windows restricts foreground activation for background apps; combining ShowWindow and SetForegroundWindow fixes tray or shortcut wakes that only show without surfacing.

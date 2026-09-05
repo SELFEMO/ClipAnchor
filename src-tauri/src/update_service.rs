@@ -1,4 +1,4 @@
-use crate::{app_log, models::UpdateStatusPayload, paths::DataPaths};
+use crate::{app_log, models::UpdateStatusPayload, paths::DataPaths, update_trust};
 use chrono::{SecondsFormat, Utc};
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter};
@@ -13,6 +13,7 @@ use std::{
     process::Command,
     sync::{atomic::{AtomicBool, Ordering as AtomicOrdering}, Mutex},
     thread,
+    time::Duration,
 };
 
 const UPDATE_STATUS_FILE: &str = "update-status.json";
@@ -43,6 +44,7 @@ struct SelectedRelease {
     release_name: String,
     release_notes: String,
     asset: Option<GitHubAsset>,
+    assets: Vec<GitHubAsset>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -220,14 +222,23 @@ pub fn install_downloaded_update(app: &AppHandle, paths: &DataPaths) -> Result<U
 fn install_downloaded_update_once(app: &AppHandle, paths: &DataPaths) -> Result<(UpdateStatusPayload, bool), String> {
     let mut status = read_status(paths).ok_or_else(|| "No downloaded update is available".to_string())?;
     let local_path = status.downloaded_path.clone().unwrap_or_default();
-    let quit_after_launch = if !local_path.trim().is_empty() && Path::new(&local_path).exists() {
-        open_installer_path(app, paths, Path::new(&local_path))?
-    } else if let Some(url) = status.asset_url.clone().filter(|value| !value.trim().is_empty()) {
-        open_external_url(&url)?;
-        false
-    } else {
-        return Err("No installer package or release URL is available".into());
-    };
+    let expected_hash = status.package_sha256.clone().unwrap_or_default();
+    let expected_url_fingerprint = status.asset_url_fingerprint.clone().unwrap_or_default();
+    let recorded_url = status.asset_url.clone().unwrap_or_default();
+    if local_path.trim().is_empty() {
+        return Err("No trusted installer package is available".into());
+    }
+    if !recorded_url.trim().is_empty() {
+        update_trust::assert_allowed_download_url(&recorded_url)?;
+        let actual_fingerprint = update_trust::hex_sha256(recorded_url.as_bytes());
+        if expected_url_fingerprint.trim().is_empty() || actual_fingerprint != expected_url_fingerprint {
+            return Err("Update URL fingerprint does not match the download record".into());
+        }
+    } else if expected_url_fingerprint.trim().is_empty() {
+        return Err("Update download metadata is incomplete".into());
+    }
+    let package = update_trust::trusted_update_package_path(paths, &local_path, &expected_hash)?;
+    let quit_after_launch = open_installer_path(app, paths, &package)?;
 
     // 只有独立覆盖脚本真正接管时才进入 installing；系统包管理器或发布页仅被打开时仍保留可安装状态，避免界面永久卡在忙碌态。
     // The state becomes installing only after a detached replacement helper takes over; opening a package manager or release page keeps the update installable instead of leaving the UI permanently busy.
@@ -307,6 +318,7 @@ fn perform_update_check(paths: &DataPaths, source: &str, auto_download: bool, in
 
     status.asset_name = Some(asset.name.clone());
     status.asset_url = Some(asset.browser_download_url.clone());
+    status.asset_url_fingerprint = Some(update_trust::hex_sha256(asset.browser_download_url.as_bytes()));
     status.total_bytes = asset.size;
 
     if !auto_download {
@@ -317,8 +329,16 @@ fn perform_update_check(paths: &DataPaths, source: &str, auto_download: bool, in
     status.message = Some("downloading_package".into());
     let _ = save_status(paths, &status);
 
-    match download_asset(paths, &asset) {
-        Ok(path) => {
+    let published_hash = match published_checksum_for_asset(&selected.assets, &asset) {
+        Ok(value) => value,
+        Err(error) => {
+            app_log::warn(paths, "update", format!("release checksum lookup failed: {}", error));
+            None
+        }
+    };
+
+    match download_asset(paths, &asset, published_hash.as_deref()) {
+        Ok((path, sha256)) => {
             app_log::info(paths, "update", format!("update package downloaded: {}", path.to_string_lossy()));
             status.status = "downloaded".into();
             status.install_ready = true;
@@ -326,6 +346,7 @@ fn perform_update_check(paths: &DataPaths, source: &str, auto_download: bool, in
             status.attention_required = true;
             status.downloaded_path = Some(path.to_string_lossy().to_string());
             status.downloaded_bytes = path.metadata().ok().map(|metadata| metadata.len());
+            status.package_sha256 = Some(sha256);
             status.message = Some("package_ready".into());
             status
         }
@@ -367,6 +388,7 @@ fn select_newer_release(releases: &[GitHubRelease], current_version: &str) -> Op
         release_name: release.name.clone().unwrap_or_else(|| release.tag_name.clone()),
         release_notes: release.body.clone().unwrap_or_default(),
         asset: select_asset_for_current_system(&release.assets),
+        assets: release.assets.clone(),
     })
 }
 
@@ -481,17 +503,24 @@ fn update_asset_cache_name(asset: &GitHubAsset) -> String {
     format!("{:016x}-{}", hash, safe_asset_name(&asset.name))
 }
 
-fn download_asset(paths: &DataPaths, asset: &GitHubAsset) -> Result<PathBuf, String> {
-    // 缓存按资产 URL 指纹与服务端大小共同验证，是为了复用完整包，同时避免零字节或中断文件被误当成可安装更新。
-    // Cache reuse validates both the asset URL fingerprint and server size so complete packages are reused while empty or interrupted files can never be treated as installable.
+fn download_asset(paths: &DataPaths, asset: &GitHubAsset, expected_sha256: Option<&str>) -> Result<(PathBuf, String), String> {
+    // 缓存按资产 URL 指纹、服务端大小和 SHA-256 共同验证，是为了复用完整包，同时避免零字节、中断文件或被替换的安装包被当成可安装更新。
+    // Cache reuse validates the asset URL fingerprint, server size, and SHA-256 so complete packages are reused while empty, interrupted, or swapped files cannot be treated as installable.
+    update_trust::assert_allowed_download_url(&asset.browser_download_url)?;
     let dir = paths.data.join(UPDATE_DIR);
     fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
     let target = dir.join(update_asset_cache_name(asset));
-    let cached_size = target.metadata().ok().map(|metadata| metadata.len()).unwrap_or(0);
-    let cache_is_valid = cached_size > 0 && asset.size.map(|expected| expected == cached_size).unwrap_or(true);
-    if cache_is_valid {
-        let _ = prune_update_packages(paths, &target);
-        return Ok(target);
+    if target.exists() {
+        if let Ok(existing_hash) = update_trust::hex_sha256_file(&target) {
+            let size_ok = target.metadata().ok().map(|metadata| metadata.len()).unwrap_or(0) > 0
+                && asset.size.map(|expected| expected == target.metadata().map(|metadata| metadata.len()).unwrap_or(0)).unwrap_or(true);
+            let hash_ok = expected_sha256.map(|expected| expected.eq_ignore_ascii_case(&existing_hash)).unwrap_or(true);
+            if size_ok && hash_ok {
+                let _ = prune_update_packages(paths, &target);
+                return Ok((target, existing_hash));
+            }
+        }
+        let _ = fs::remove_file(&target);
     }
 
     let partial = target.with_file_name(format!(
@@ -512,6 +541,13 @@ fn download_asset(paths: &DataPaths, asset: &GitHubAsset) -> Result<PathBuf, Str
             return Err(format!("Downloaded package size mismatch: expected {}, got {}", expected_size, downloaded_size));
         }
     }
+    let sha256 = update_trust::hex_sha256_file(&partial)?;
+    if let Some(expected) = expected_sha256 {
+        if !expected.eq_ignore_ascii_case(&sha256) {
+            let _ = fs::remove_file(&partial);
+            return Err("Downloaded package hash does not match the published checksum".into());
+        }
+    }
 
     if target.exists() {
         fs::remove_file(&target).map_err(|error| error.to_string())?;
@@ -520,89 +556,67 @@ fn download_asset(paths: &DataPaths, asset: &GitHubAsset) -> Result<PathBuf, Str
     // Downloading to a sibling temporary file before rename ensures the status file never points at a half-written installer.
     fs::rename(&partial, &target).map_err(|error| error.to_string())?;
     prune_update_packages(paths, &target)?;
-    Ok(target)
+    Ok((target, sha256))
+}
+
+fn published_checksum_for_asset(assets: &[GitHubAsset], asset: &GitHubAsset) -> Result<Option<String>, String> {
+    let Some(checksum_asset) = assets.iter().find(|candidate| update_trust::is_checksum_asset_name(&candidate.name)) else {
+        return Ok(None);
+    };
+    update_trust::assert_allowed_download_url(&checksum_asset.browser_download_url)?;
+    let text = fetch_url_text(&checksum_asset.browser_download_url)?;
+    Ok(update_trust::published_sha256_for_asset(&text, &asset.name))
+}
+
+fn http_client() -> Result<reqwest::blocking::Client, String> {
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if !update_trust::is_allowed_download_url(attempt.url().as_str()) {
+                return attempt.error("redirect host is not allowed");
+            }
+            if attempt.previous().len() >= 5 {
+                attempt.error("too many redirects")
+            } else {
+                attempt.follow()
+            }
+        }))
+        .user_agent(DOWNLOAD_USER_AGENT)
+        .build()
+        .map_err(|error| error.to_string())
 }
 
 fn fetch_url_text(url: &str) -> Result<String, String> {
-    let mut attempts = Vec::new();
-
-    #[cfg(target_os = "windows")]
-    {
-        let escaped = powershell_quote(url);
-        attempts.push(command_output(
-            "powershell",
-            &[
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                &format!(
-                    "$ProgressPreference='SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; (Invoke-WebRequest -UseBasicParsing -Uri '{}' -Headers @{{'User-Agent'='{}'}}).Content",
-                    escaped, DOWNLOAD_USER_AGENT
-                ),
-            ],
-        ));
+    update_trust::assert_allowed_download_url(url)?;
+    let client = http_client()?;
+    let response = client
+        .get(url)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .map_err(|error| error.to_string())?;
+    update_trust::assert_allowed_download_url(response.url().as_str())?;
+    if !response.status().is_success() {
+        return Err(format!("HTTP {}", response.status()));
     }
-
-    attempts.push(command_output(
-        "curl",
-        &["-fsSL", "-A", DOWNLOAD_USER_AGENT, "-H", "Accept: application/vnd.github+json", url],
-    ));
-
-    attempts.into_iter().find_map(Result::ok).ok_or_else(|| "No supported HTTP downloader could read GitHub releases".into())
+    response.text().map_err(|error| error.to_string())
 }
 
 fn download_url_to_path(url: &str, target: &Path) -> Result<(), String> {
-    let mut errors = Vec::new();
-    let target_text = target.to_string_lossy().to_string();
-
-    #[cfg(target_os = "windows")]
-    {
-        let escaped_url = powershell_quote(url);
-        let escaped_target = powershell_quote(&target_text);
-        match command_status(
-            "powershell",
-            &[
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                &format!(
-                    "$ProgressPreference='SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -UseBasicParsing -Uri '{}' -OutFile '{}' -Headers @{{'User-Agent'='{}'}}",
-                    escaped_url, escaped_target, DOWNLOAD_USER_AGENT
-                ),
-            ],
-        ) {
-            Ok(()) => return Ok(()),
-            Err(error) => errors.push(error),
-        }
+    update_trust::assert_allowed_download_url(url)?;
+    let client = http_client()?;
+    let response = client.get(url).send().map_err(|error| error.to_string())?;
+    update_trust::assert_allowed_download_url(response.url().as_str())?;
+    if !response.status().is_success() {
+        return Err(format!("HTTP {}", response.status()));
     }
-
-    match command_status(
-        "curl",
-        &["-fL", "--silent", "--show-error", "-A", DOWNLOAD_USER_AGENT, "-o", &target_text, url],
-    ) {
-        Ok(()) => Ok(()),
-        Err(error) => {
-            errors.push(error);
-            Err(errors.join("; "))
-        }
+    let bytes = response.bytes().map_err(|error| error.to_string())?;
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
+    fs::write(target, bytes).map_err(|error| error.to_string())
 }
 
-fn command_output(program: &str, args: &[&str]) -> Result<String, String> {
-    let mut command = Command::new(program);
-    command.args(args);
-    configure_silent_child_process(&mut command);
-    let output = command.output().map_err(|error| error.to_string())?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
-}
-
+#[cfg(target_os = "linux")]
 fn command_status(program: &str, args: &[&str]) -> Result<(), String> {
     let mut command = Command::new(program);
     command.args(args);
@@ -632,8 +646,8 @@ fn configure_silent_child_process(command: &mut Command) {
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
-        // 更新检查会在后台触发 PowerShell 或 curl 兜底下载器，隐藏子进程控制台是为了保证后台任务不打断用户当前操作。
-        // The updater may invoke PowerShell or curl as fallback downloaders in the background, so hiding child consoles keeps background work from interrupting the user.
+        // 安装脚本通过隐藏子进程启动，是为了避免覆盖更新时弹出控制台窗口打断用户。
+        // Installer helpers launch as hidden child processes so replacement updates do not flash a console window.
         command.creation_flags(CREATE_NO_WINDOW);
     }
 }
@@ -1152,56 +1166,6 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", escaped)
 }
 
-fn open_external_url(url: &str) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    {
-        open_target_with_shell_execute(url)?;
-        return Ok(());
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        Command::new("open").arg(url).spawn().map_err(|error| error.to_string())?;
-        return Ok(());
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        Command::new("xdg-open").arg(url).spawn().map_err(|error| error.to_string())?;
-        return Ok(());
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn open_target_with_shell_execute(target: &str) -> Result<(), String> {
-    use std::{ffi::OsStr, os::windows::ffi::OsStrExt, ptr};
-    use windows_sys::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
-
-    fn wide_null(value: &str) -> Vec<u16> {
-        OsStr::new(value).encode_wide().chain(std::iter::once(0)).collect()
-    }
-
-    let operation = wide_null("open");
-    let target_wide = wide_null(target);
-    // 打开外部链接交给 ShellExecute，而不是 cmd /C start，是为了避免“稍后打开发布页”也闪出命令行窗口。
-    // External links are opened through ShellExecute instead of cmd /C start so release-page fallbacks never flash a console window.
-    let result = unsafe {
-        ShellExecuteW(
-            ptr::null_mut(),
-            operation.as_ptr(),
-            target_wide.as_ptr(),
-            ptr::null(),
-            ptr::null(),
-            SW_SHOWNORMAL,
-        ) as isize
-    };
-    if result <= 32 {
-        Err(format!("System could not open the link ({})", result))
-    } else {
-        Ok(())
-    }
-}
-
 fn current_platform() -> PlatformKind {
     if cfg!(target_os = "windows") {
         PlatformKind::Windows
@@ -1398,6 +1362,8 @@ fn base_status(status: &str, source: &str) -> UpdateStatusPayload {
         asset_name: None,
         asset_url: None,
         downloaded_path: None,
+        package_sha256: None,
+        asset_url_fingerprint: None,
         total_bytes: None,
         downloaded_bytes: None,
         install_ready: false,

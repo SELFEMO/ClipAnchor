@@ -8,7 +8,10 @@ mod autostart;
 mod clipboard_service;
 mod commands;
 mod database;
+mod fs_guard;
 mod models;
+mod privacy;
+mod secrets;
 mod macos_native;
 mod paths;
 mod popup;
@@ -16,6 +19,7 @@ mod settings;
 mod shortcut;
 mod tray;
 mod update_service;
+mod update_trust;
 mod window_control;
 mod window_shape;
 
@@ -106,8 +110,6 @@ pub fn run() {
     }));
 
     let app = match tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             match shortcut::handle_external_shortcut_args(app, &args) {
@@ -169,6 +171,7 @@ pub fn run() {
             set_history_service,
             set_privacy_mode,
             set_privacy_filter_mode,
+            set_clipboard_paused,
             set_autostart,
             list_history,
             delete_records,
@@ -191,11 +194,8 @@ pub fn run() {
             resize_popup,
             refresh_popup_shape,
             save_popup_position,
-            open_position_overlay,
             export_history,
             import_history,
-            export_history_to_path,
-            import_history_from_path,
             get_data_usage,
             get_log_status,
             clear_logs,

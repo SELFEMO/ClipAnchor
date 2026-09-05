@@ -180,7 +180,6 @@ Use these files when creating a language pack:
 - English source messages and authoritative keys: [`src/locales/en.js`](src/locales/en.js)
 - Public JSON template: [`docs/i18n/language-pack.template.json`](docs/i18n/language-pack.template.json)
 - Detailed translation guide: [`docs/i18n/README.md`](docs/i18n/README.md)
-- Optional validator: [`scripts/validate-language-pack.mjs`](scripts/validate-language-pack.mjs)
 
 Copy the keys from the `messages` object in `src/locales/en.js` and translate the values only. Do not translate, delete, or arbitrarily rename message keys.
 
@@ -248,16 +247,6 @@ data/locales/
 ```
 
 Return to Settings and click **Reload language packs** beside **Open language folder**. The backend immediately rescans the active `data/locales/` directory, so the tray process and application do not need to restart.
-
-### Validate a language pack
-
-From the project root:
-
-```bash
-node scripts/validate-language-pack.mjs data/locales/fr.json
-```
-
-The validator checks the filename, JSON structure, missing keys, changed source entries, manually modified translations, and removed keys.
 
 ### Incremental update rules
 
@@ -331,11 +320,11 @@ The manual **Check update** button opens an in-app status card immediately and c
 
 Asset selection is automatic:
 
-- Windows prefers `ClipAnchor_Windows_x64.exe`; when no EXE exists, it selects a matching MSI such as `ClipAnchor_Windows_x64_zh-CN.msi` or `ClipAnchor_Windows_x64_en-US.msi`.
+- Windows prefers MSI packages such as `ClipAnchor_Windows_x64.msi` for unattended replacement because they expose standard silent install arguments; EXE installers remain a compatible fallback.
 - macOS uses DMG and filters architecture-specific filenames so Apple Silicon selects ARM64 or universal packages rather than Intel-only packages.
 - Linux selects DEB or RPM according to the distribution family.
 
-A complete package under `data/updates/` is reused only when its release-asset fingerprint and expected size match. Downloads are written to a temporary sibling file and renamed only after validation; older installer packages are pruned after the new package is ready. **Install now** uses a detached platform handoff and restarts ClipAnchor after a successful replacement when supported.
+A complete package under `data/updates/` is reused only when its release-asset fingerprint, expected size, and SHA-256 hash match. Downloads use HTTPS GitHub hosts only and are written to a temporary sibling file before rename. **Install now** refuses paths outside `data/updates/` or status metadata that does not match the downloaded file, then uses a detached platform handoff and restarts ClipAnchor after a successful replacement when supported.
 
 ## Project layout
 

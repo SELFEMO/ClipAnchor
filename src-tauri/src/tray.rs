@@ -35,6 +35,19 @@ pub fn install_tray(app: &AppHandle) -> tauri::Result<()> {
                     }
                 }
             }
+            "pause" => {
+                if let Some(state) = app.try_state::<crate::models::AppState>() {
+                    if let Ok(mut settings) = state.settings.lock() {
+                        settings.clipboard_paused = !settings.clipboard_paused;
+                        let updated = settings.clone();
+                        app_log::info(&state.paths, "tray", format!("clipboard pause toggled to {}", updated.clipboard_paused));
+                        let _ = crate::settings::save(&state.paths, &updated);
+                        drop(settings);
+                        let _ = app.emit("clipanchor-settings-changed", updated);
+                        let _ = refresh_tray(app);
+                    }
+                }
+            }
             "quit" => {
                 if let Some(state) = app.try_state::<crate::models::AppState>() { app_log::warn(&state.paths, "tray", "quit menu clicked"); }
                 app.exit(0);
@@ -67,7 +80,11 @@ pub fn refresh_tray(app: &AppHandle) -> tauri::Result<()> {
         // 直接替换菜单而不是先传入 None，是为了兼容 Tauri v2 对 set_menu 泛型参数的推断，同时仍让托盘使用最新语言文本。
         // Replacing the menu directly instead of passing None keeps Tauri v2 generic inference valid while still applying the latest localized labels.
         tray.set_menu(Some(menu))?;
-        let _ = tray.set_tooltip(Some("ClipAnchor"));
+        let paused = app.try_state::<crate::models::AppState>()
+            .and_then(|state| state.settings.lock().ok().map(|settings| settings.clipboard_paused))
+            .unwrap_or(false);
+        let tooltip = if paused { "ClipAnchor — paused" } else { "ClipAnchor" };
+        let _ = tray.set_tooltip(Some(tooltip));
     }
     Ok(())
 }
@@ -75,13 +92,15 @@ pub fn refresh_tray(app: &AppHandle) -> tauri::Result<()> {
 fn build_tray_menu<R: tauri::Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let labels = tray_labels(app);
     let show = MenuItem::with_id(app, "show", labels.show.as_str(), true, None::<&str>)?;
+    let pause = MenuItem::with_id(app, "pause", labels.pause.as_str(), true, None::<&str>)?;
     let privacy = MenuItem::with_id(app, "privacy", labels.privacy.as_str(), true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", labels.quit.as_str(), true, None::<&str>)?;
-    Menu::with_items(app, &[&show, &privacy, &quit])
+    Menu::with_items(app, &[&show, &pause, &privacy, &quit])
 }
 
 struct TrayLabels {
     show: String,
+    pause: String,
     privacy: String,
     quit: String,
 }
@@ -91,11 +110,18 @@ fn tray_labels<R: tauri::Runtime>(app: &AppHandle<R>) -> TrayLabels {
         .and_then(|state| state.settings.lock().ok().map(|settings| settings.clone()));
     let is_chinese = settings.as_ref().map(|settings| locale_is_chinese(&settings.locale)).unwrap_or_else(system_locale_is_chinese);
     let privacy_enabled = settings.as_ref().map(|settings| settings.privacy_filter_mode != "off").unwrap_or(true);
+    let paused = settings.as_ref().map(|settings| settings.clipboard_paused).unwrap_or(false);
+    let pause = match (is_chinese, paused) {
+        (true, true) => "恢复剪贴板监听".to_string(),
+        (true, false) => "暂停剪贴板监听".to_string(),
+        (false, true) => "Resume clipboard listening".to_string(),
+        (false, false) => "Pause clipboard listening".to_string(),
+    };
     match (is_chinese, privacy_enabled) {
-        (true, true) => TrayLabels { show: "显示 ClipAnchor".into(), privacy: "关闭隐私过滤".into(), quit: "退出".into() },
-        (true, false) => TrayLabels { show: "显示 ClipAnchor".into(), privacy: "开启隐私过滤".into(), quit: "退出".into() },
-        (false, true) => TrayLabels { show: "Show ClipAnchor".into(), privacy: "Disable privacy filter".into(), quit: "Quit".into() },
-        (false, false) => TrayLabels { show: "Show ClipAnchor".into(), privacy: "Enable privacy filter".into(), quit: "Quit".into() },
+        (true, true) => TrayLabels { show: "显示 ClipAnchor".into(), pause, privacy: "关闭隐私过滤".into(), quit: "退出".into() },
+        (true, false) => TrayLabels { show: "显示 ClipAnchor".into(), pause, privacy: "开启隐私过滤".into(), quit: "退出".into() },
+        (false, true) => TrayLabels { show: "Show ClipAnchor".into(), pause, privacy: "Disable privacy filter".into(), quit: "Quit".into() },
+        (false, false) => TrayLabels { show: "Show ClipAnchor".into(), pause, privacy: "Enable privacy filter".into(), quit: "Quit".into() },
     }
 }
 

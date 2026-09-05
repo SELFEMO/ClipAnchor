@@ -1,7 +1,7 @@
 {
   "identifier": "default",
-  "description": "Main ClipAnchor permissions",
-  "windows": ["*"],
+  "description": "Main ClipAnchor window permissions",
+  "windows": ["main"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
@@ -16,7 +16,6 @@
     "core:event:allow-listen",
     "core:event:allow-emit",
     "dialog:default",
-    "opener:default",
-    "shell:default"
+    "allow-main-commands"
   ]
 }

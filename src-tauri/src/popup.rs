@@ -160,12 +160,6 @@ fn apply_native_popup_shape(window: &tauri::WebviewWindow) {
     crate::window_shape::apply_clipanchor_radius(window);
 }
 
-pub fn open_position_overlay(_app: &AppHandle) -> Result<(), String> {
-    // 旧的独立定位窗口入口保留为安全空操作，是为了兼容旧前端调用但彻底避免再次创建会卡死的 WebView 窗口。
-    // The legacy standalone locator entrypoint remains a safe no-op for compatibility while preventing any freezing WebView window from being created again.
-    Ok(())
-}
-
 pub fn close_popup(app: &AppHandle, id: &str) -> Result<(), String> {
     if let Some(state) = app.try_state::<AppState>() { app_log::info(&state.paths, "popup", format!("close window by id={}", id)); }
     if let Some(window) = app.get_webview_window(&popup_label(id)) {

@@ -403,8 +403,10 @@ export default function App() {
 
   const pageTitle = tab === 'favorites' ? t('favoritesTitle') : (tab === 'clipboard' ? t('clipboardTitle') : t('settingsTitle'));
   const PageIcon = tab === 'favorites' ? Star : (tab === 'clipboard' ? ClipboardList : Settings);
-  const privacyMode = boot.settings.privacy_filter_mode || (boot.settings.privacy_mode ? 'light' : 'off');
-  const privacyStatus = privacyMode === 'off' ? t('privacyOff') : `${t('privacyOn')} · ${privacyMode === 'smart' ? t('privacySmartMode') : t('privacyLightMode')}`;
+  const privacyMode = boot.settings.privacy_filter_mode === 'light' ? 'light' : 'off';
+  const privacyStatus = boot.settings.clipboard_paused
+    ? t('clipboardPaused')
+    : (privacyMode === 'off' ? t('privacyOff') : `${t('privacyOn')} · ${t('privacyLightMode')}`);
   // 侧边栏快捷键徽标只在后端声明支持时显示，并使用平台化键名，避免 Linux 暴露无效入口或 macOS 用户误认 Ctrl。
   // The sidebar shortcut badge appears only when the backend declares support and uses platform-aware labels, avoiding an invalid Linux entry and Ctrl confusion on macOS.
   const globalShortcutsSupported = boot.capabilities?.global_shortcuts_supported !== false;
@@ -482,9 +484,9 @@ export default function App() {
 
           <div className="content-surface">
             {tab === 'clipboard' ? (
-              <ClipboardPage t={t} settings={boot.settings} refreshKey={refreshKey} mode="clipboard" />
+              <ClipboardPage t={t} refreshKey={refreshKey} mode="clipboard" />
             ) : tab === 'favorites' ? (
-              <ClipboardPage t={t} settings={boot.settings} refreshKey={refreshKey} mode="favorites" />
+              <ClipboardPage t={t} refreshKey={refreshKey} mode="favorites" />
             ) : (
               <SettingsPage t={t} boot={boot} onBootChange={setBoot} updateStatus={updateStatus} onCheckUpdate={checkUpdate} languagePacks={languagePacks} onLanguagePacksChange={setLanguagePacks} />
             )}

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUp, Copy, FileIcon, FolderOpen, ImageIcon, Layers, Pencil, Pin, Plus, RefreshCw, Save, Search, ShieldCheck, Sparkles, Star, Trash, X } from 'lucide-react';
 import { api } from '../api.js';
+import { safeImageSrc } from '../safeImageSrc.js';
 import { useTransientScrollbar } from '../useTransientScrollbar.js';
 
 function iconFor(kind) {
@@ -15,7 +16,7 @@ function ImageThumb({ record }) {
     let active = true;
     if (!record.image_path) return undefined;
     api.readImageDataUrl(record.id).then((value) => {
-      if (active) setSrc(value || '');
+      if (active) setSrc(safeImageSrc(value));
     }).catch(() => {
       if (active) setSrc('');
     });

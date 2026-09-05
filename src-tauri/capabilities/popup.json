@@ -1,0 +1,12 @@
+{
+  "identifier": "popup",
+  "description": "Clipboard popup window permissions",
+  "windows": ["clipanchor-popup-*"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-start-resize-dragging",
+    "core:event:allow-listen",
+    "allow-popup-commands"
+  ]
+}

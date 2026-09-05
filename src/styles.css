@@ -246,6 +246,10 @@ kbd {
   background: linear-gradient(180deg, #3aa5ff, #1c76ce);
   box-shadow: 0 12px 28px rgba(49, 159, 255, .18);
 }
+.primary-button {
+  min-height: 42px;
+  padding: 9px 16px;
+}
 .soft-button { min-height: 38px; padding: 9px 13px; }
 
 .workspace-header {
@@ -2713,6 +2717,50 @@ h1 {
   .service-grid .privacy-filter-row .segmented { justify-self: stretch; max-width: none; }
 }
 
+.capture-type-row {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.capture-type-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(148px, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+.settings-card label.capture-type-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  min-height: 54px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, .07);
+  grid-template-columns: none;
+}
+.theme-light .settings-card label.capture-type-item {
+  background: rgba(15, 23, 42, .035);
+}
+.capture-type-item > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.capture-type-item .switch {
+  flex: 0 0 auto;
+  justify-self: auto;
+}
+@media (max-width: 900px) {
+  .capture-type-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .soft-modal-backdrop {
   position: fixed;
   inset: 0;
@@ -2748,6 +2796,9 @@ h1 {
 .soft-modal-card .primary-button {
   justify-self: end;
   min-width: 96px;
+  min-height: 42px;
+  padding: 9px 16px;
+  border-radius: 12px;
 }
 .theme-light .soft-modal-card {
   background: rgba(255, 255, 255, .96);
@@ -3560,8 +3611,12 @@ h1 {
   gap: 10px;
 }
 .settings-dialog-actions .primary-button,
-.settings-dialog-actions .soft-button {
+.settings-dialog-actions .soft-button,
+.settings-dialog-actions .secondary-button {
   min-width: 84px;
+  min-height: 42px;
+  padding: 9px 16px;
+  border-radius: 12px;
 }
 .clipanchor-popup-body {
   --popup-window-radius: 30px;
@@ -4621,6 +4676,12 @@ h1 {
   grid-column: 1 / -1;
   justify-content: flex-end;
 }
+.update-placeholder-actions .primary-button,
+.update-placeholder-actions .secondary-button {
+  min-height: 42px;
+  padding: 9px 16px;
+  border-radius: 12px;
+}
 
 /* 更新按钮提示点只在后台检查失败或发现新版本时出现，是为了让用户稍后能回到更新入口，同时不在自启动静默阶段弹窗打扰。 */
 /* The update dot appears only after failed background checks or available updates so users can return later without being interrupted during silent startup. */
@@ -5042,9 +5103,13 @@ h1 {
 }
 
 .secondary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
   border: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
   border-radius: 12px;
-  padding: 10px 14px;
+  padding: 9px 16px;
   background: color-mix(in srgb, var(--surface) 84%, transparent);
   color: var(--muted);
   font: inherit;

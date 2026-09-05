@@ -1,10 +1,10 @@
-use crate::{clipboard_service, models::{ClipItem, ClipKind, HistoryRecord}, paths::DataPaths};
+use crate::{clipboard_service, models::{ClipItem, ClipKind, ClipRecord, HistoryRecord}, paths::DataPaths};
 use chrono::{Duration, Utc};
 use rusqlite::{params, Connection};
 
 #[derive(Clone, Debug)]
 pub struct CaptureSaveOutcome {
-    pub record: HistoryRecord,
+    pub record: ClipRecord,
     pub was_duplicate: bool,
 }
 
@@ -128,8 +128,6 @@ pub fn insert(paths: &DataPaths, item: &ClipItem) -> Result<(), String> {
 
 pub fn insert_or_refresh(paths: &DataPaths, item: &ClipItem) -> Result<CaptureSaveOutcome, String> {
     let db = conn(paths)?;
-    ensure_columns(&db)?;
-    backfill_content_hash(&db)?;
     let file_paths = serde_json::to_string(&item.file_paths).map_err(|error| error.to_string())?;
 
     if let Some(existing) = duplicate_record_to_refresh(&db, item)? {
@@ -219,8 +217,6 @@ fn remove_extra_duplicate_records(db: &Connection, item: &ClipItem, keep_id: &st
 
 pub fn list(paths: &DataPaths, query: &str, kind: &str, limit: u32) -> Result<Vec<HistoryRecord>, String> {
     let db = conn(paths)?;
-    ensure_columns(&db)?;
-    backfill_content_hash(&db)?;
     let pattern = format!("%{}%", query);
     let limit_clause = if limit == 0 { String::new() } else { format!(" LIMIT {}", limit) };
 
@@ -246,8 +242,6 @@ pub fn list(paths: &DataPaths, query: &str, kind: &str, limit: u32) -> Result<Ve
 
 pub fn get(paths: &DataPaths, id: &str) -> Result<Option<HistoryRecord>, String> {
     let db = conn(paths)?;
-    ensure_columns(&db)?;
-    backfill_content_hash(&db)?;
     let mut stmt = db.prepare(
         "SELECT id, kind, summary, text_content, image_path, file_paths, bytes, created_at, content_hash, is_pinned FROM records WHERE id = ?1"
     ).map_err(|error| error.to_string())?;
@@ -280,14 +274,12 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryRecord> {
 
 pub fn set_pinned(paths: &DataPaths, id: &str, pinned: bool) -> Result<HistoryRecord, String> {
     let db = conn(paths)?;
-    ensure_columns(&db)?;
     db.execute("UPDATE records SET is_pinned = ?1 WHERE id = ?2", params![pinned as i32, id]).map_err(|error| error.to_string())?;
     get(paths, id)?.ok_or_else(|| "Record not found".to_string())
 }
 
 pub fn delete(paths: &DataPaths, ids: &[String]) -> Result<Vec<HistoryRecord>, String> {
     let db = conn(paths)?;
-    ensure_columns(&db)?;
     let mut deleted = Vec::new();
     for id in ids {
         if let Some(record) = get(paths, id)? {
@@ -303,7 +295,6 @@ pub fn delete(paths: &DataPaths, ids: &[String]) -> Result<Vec<HistoryRecord>, S
 
 pub fn delete_force(paths: &DataPaths, ids: &[String]) -> Result<Vec<HistoryRecord>, String> {
     let db = conn(paths)?;
-    ensure_columns(&db)?;
     let mut deleted = Vec::new();
     for id in ids {
         if let Some(record) = get(paths, id)? {
@@ -316,7 +307,6 @@ pub fn delete_force(paths: &DataPaths, ids: &[String]) -> Result<Vec<HistoryReco
 
 pub fn clear(paths: &DataPaths, preserve_pinned: bool) -> Result<Vec<HistoryRecord>, String> {
     let db = conn(paths)?;
-    ensure_columns(&db)?;
     let select_sql = if preserve_pinned {
         "SELECT id, kind, summary, text_content, image_path, file_paths, bytes, created_at, content_hash, is_pinned FROM records WHERE is_pinned = 0 ORDER BY created_at DESC"
     } else {
@@ -337,7 +327,6 @@ pub fn clear(paths: &DataPaths, preserve_pinned: bool) -> Result<Vec<HistoryReco
 
 pub fn delete_older_than(paths: &DataPaths, days: u32, preserve_pinned: bool) -> Result<Vec<HistoryRecord>, String> {
     let db = conn(paths)?;
-    ensure_columns(&db)?;
     let cutoff = (Utc::now() - Duration::days(i64::from(days))).to_rfc3339();
     let select_sql = if preserve_pinned {
         "SELECT id, kind, summary, text_content, image_path, file_paths, bytes, created_at, content_hash, is_pinned FROM records WHERE created_at < ?1 AND is_pinned = 0 ORDER BY created_at DESC"

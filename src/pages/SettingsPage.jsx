@@ -1,291 +1,21 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { BadgeCheck, Clock3, Database, Download, FolderOpen, HelpCircle, Keyboard, MapPinned, Minus, Palette, Plus, Power, RefreshCw, RotateCcw, Trash2, TriangleAlert, Upload } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { BadgeCheck, Keyboard, MapPinned, Power, RefreshCw, TriangleAlert } from 'lucide-react';
 import { api } from '../api.js';
 import { detectSystemLanguageCode, getReferenceMessages, inferLanguageLabel, listLanguageChoices, normalizeLocaleCode } from '../i18n.js';
-import { captureShortcutValue, formatShortcutForDisplay, normalizeShortcutForStorage } from '../shortcutDisplay.js';
-
-function Switch({ checked, onChange }) {
-  return <button className={`switch ${checked ? 'on' : ''}`} onClick={() => onChange(!checked)}><span /></button>;
-}
-
-function captureShortcut(event, setter) {
-  event.preventDefault();
-  const shortcut = captureShortcutValue(event);
-  if (shortcut) setter(shortcut);
-}
-
-function selectPortablePath(event) {
-  // Read-only path fields keep native text selection so Cmd/Ctrl+C works on macOS, Windows, and Linux.
-  event.currentTarget.select();
-}
-
-function Segmented({ value, options, onChange, className = '' }) {
-  const classes = ['segmented', className].filter(Boolean).join(' ');
-  return (
-    <div className={classes}>
-      {options.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          className={value === option.value ? 'active' : ''}
-          title={option.label}
-          onClick={() => onChange(option.value)}
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function DropdownSelect({ value, options, onChange, disabled = false, ariaLabel = '' }) {
-  const [open, setOpen] = useState(false);
-  const current = options.find((option) => option.value === value) || options[0];
-
-  function choose(optionValue) {
-    setOpen(false);
-    if (optionValue !== value) onChange(optionValue);
-  }
-
-  return (
-    <div
-      className={`codex-dropdown ${open ? 'open' : ''}`}
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
-      }}
-    >
-      <button
-        type="button"
-        className="codex-dropdown-button"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-label={ariaLabel}
-        disabled={disabled}
-        onClick={() => setOpen((next) => !next)}
-      >
-        <span>{current?.label || value}</span>
-        <i aria-hidden="true">⌄</i>
-      </button>
-      {open ? (
-        <div className="codex-dropdown-menu" role="listbox">
-          {options.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              role="option"
-              aria-selected={option.value === value}
-              className={option.value === value ? 'selected' : ''}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => choose(option.value)}
-            >
-              <span>{option.label}</span>
-              {option.value === value ? <em>✓</em> : null}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function estimateHelpBubbleWidth(text) {
-  const content = Array.from(String(text || '').trim());
-  const weightedLength = content.reduce((sum, char) => {
-    if (/\s/.test(char)) return sum + 0.32;
-    if (/[\u2e80-\u9fff\uff00-\uffef]/.test(char)) return sum + 1.05;
-    if (/[A-Z0-9]/.test(char)) return sum + 0.72;
-    return sum + 0.56;
-  }, 0);
-  const hasCjk = content.some((char) => /[\u2e80-\u9fff\uff00-\uffef]/.test(char));
-  const targetLineUnits = hasCjk ? 18 : 34;
-  const estimatedLines = Math.max(1, Math.ceil(weightedLength / targetLineUnits));
-  const balancedUnits = Math.ceil(weightedLength / Math.min(3, estimatedLines));
-  const preferred = Math.round(42 + balancedUnits * (hasCjk ? 13.5 : 8.2));
-  const viewportMax = Math.max(180, window.innerWidth - 36);
-  // 气泡按“预计行数 + 文本长度”估算宽度，而不是固定宽度，避免短文案过宽、长文案最后一行只剩一两个字。
-  // Bubble width is estimated from expected line count plus text length instead of a fixed value, avoiding oversized short hints and one-word trailing lines.
-  return Math.min(Math.max(168, preferred), Math.min(360, viewportMax));
-}
-
-function calculateHelpBubblePlacement(rect, width) {
-  const margin = 18;
-  const center = rect.left + rect.width / 2;
-  const viewportWidth = window.innerWidth;
-  const normalized = Math.max(-1, Math.min(1, (center - viewportWidth / 2) / Math.max(1, viewportWidth / 2)));
-  const anchorRatio = Math.max(0.42, Math.min(0.58, 0.5 + normalized * 0.13));
-  const unclampedLeft = center - width * anchorRatio;
-  const left = Math.min(Math.max(margin, unclampedLeft), viewportWidth - width - margin);
-  const actualAnchor = Math.max(20, Math.min(width - 20, center - left));
-  const align = actualAnchor < width * 0.45 ? 'left' : actualAnchor > width * 0.55 ? 'right' : 'center';
-  return { left, actualAnchor, align };
-}
-
-function HelpTip({ text }) {
-  const tipRef = useRef(null);
-  const [bubble, setBubble] = useState(null);
-  if (!text) return null;
-
-  function showBubble() {
-    const rect = tipRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const width = estimateHelpBubbleWidth(text);
-    const { left, actualAnchor, align } = calculateHelpBubblePlacement(rect, width);
-    const fitsAbove = rect.top > 92;
-    setBubble({
-      left,
-      top: fitsAbove ? rect.top - 10 : rect.bottom + 10,
-      width,
-      anchorX: actualAnchor,
-      align,
-      placement: fitsAbove ? 'top' : 'bottom'
-    });
-  }
-
-  function hideBubble() {
-    setBubble(null);
-  }
-
-  return (
-    <>
-      <span
-        ref={tipRef}
-        className="help-tip"
-        tabIndex="0"
-        aria-label={text}
-        onMouseEnter={showBubble}
-        onMouseLeave={hideBubble}
-        onFocus={showBubble}
-        onBlur={hideBubble}
-      >
-        <HelpCircle size={14} />
-      </span>
-      {bubble ? createPortal(
-        <span
-          className={`help-bubble floating-help-bubble ${bubble.placement === 'bottom' ? 'below' : 'above'} align-${bubble.align}`}
-          style={{ left: `${bubble.left}px`, top: `${bubble.top}px`, width: `${bubble.width}px`, '--help-anchor-x': `${bubble.anchorX}px` }}
-        >
-          {text}
-        </span>,
-        document.body
-      ) : null}
-    </>
-  );
-}
-
-function SettingName({ children, help }) {
-  return <span className="setting-name"><span>{children}</span><HelpTip text={help} /></span>;
-}
-
-function Stepper({ value, min, max, step = 5, suffix = '', onChange, onReset, resetLabel = 'Reset' }) {
-  const current = Number(value);
-  const clamp = (next) => Math.min(max, Math.max(min, next));
-  const update = (next) => onChange(clamp(next));
-  return (
-    <div className="stepper-control">
-      <button type="button" aria-label="Decrease" disabled={current <= min} onClick={() => update(current - step)}><Minus size={14} /></button>
-      <strong>{current}{suffix}</strong>
-      <button type="button" aria-label="Increase" disabled={current >= max} onClick={() => update(current + step)}><Plus size={14} /></button>
-      {onReset ? <button type="button" className="reset-stepper" aria-label={resetLabel} title={resetLabel} onClick={() => onReset()}><RotateCcw size={13} /></button> : null}
-    </div>
-  );
-}
-
-function PositionMap({ settings, t, onSave }) {
-  const mapRef = useRef(null);
-  const screenWidth = Math.max(800, window.screen?.availWidth || window.screen?.width || 1920);
-  const screenHeight = Math.max(600, window.screen?.availHeight || window.screen?.height || 1080);
-  const popupScale = Math.min(200, Math.max(50, Number(settings.popup_scale_percent || 100))) / 100;
-  const popupWidth = Math.round(Math.min(520, Math.max(280, Number(settings.popup_width || 340))) * popupScale);
-  const popupHeight = Math.round(Math.min(360, Math.max(160, Number(settings.popup_height || 220))) * popupScale);
-  const mockMaxWidth = 150;
-  const mockPopupWidth = Math.round(mockMaxWidth);
-  const mockPopupHeight = Math.round(Math.min(104, Math.max(62, mockMaxWidth * (popupHeight / popupWidth))));
-  const maxX = Math.max(0, screenWidth - popupWidth);
-  const maxY = Math.max(0, screenHeight - popupHeight);
-  const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
-  const [draft, setDraft] = useState({
-    x: clamp(settings.popup_x ?? 24, 0, maxX),
-    y: clamp(settings.popup_y ?? 24, 0, maxY)
-  });
-  const [saving, setSaving] = useState(false);
-
-  function updateFromPointer(event) {
-    const rect = mapRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const localX = clamp(event.clientX - rect.left, 0, rect.width);
-    const localY = clamp(event.clientY - rect.top, 0, rect.height);
-    const usableWidth = Math.max(1, rect.width - mockPopupWidth);
-    const usableHeight = Math.max(1, rect.height - mockPopupHeight);
-    const ratioX = clamp((localX - mockPopupWidth / 2) / usableWidth, 0, 1);
-    const ratioY = clamp((localY - mockPopupHeight / 2) / usableHeight, 0, 1);
-    const nextX = Math.round(ratioX * maxX);
-    const nextY = Math.round(ratioY * maxY);
-    setDraft({ x: nextX, y: nextY });
-  }
-
-  function beginDrag(event) {
-    event.preventDefault();
-    updateFromPointer(event);
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-  }
-
-  async function save() {
-    setSaving(true);
-    try {
-      // 定位器用“屏幕尺寸减去弹窗尺寸”作为最大坐标，是为了让真实弹窗和预览弹窗都不会越出屏幕边界。
-      // The locator uses screen size minus popup size as the maximum coordinate so both the real popup and preview popup stay inside screen bounds.
-      await api.savePopupPosition(draft.x, draft.y);
-      onSave(draft.x, draft.y);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const ratioX = maxX > 0 ? clamp(draft.x / maxX, 0, 1) : 0;
-  const ratioY = maxY > 0 ? clamp(draft.y / maxY, 0, 1) : 0;
-  const left = `calc(${ratioX * 100}% - ${ratioX * mockPopupWidth}px)`;
-  const top = `calc(${ratioY * 100}% - ${ratioY * mockPopupHeight}px)`;
-
-  return (
-    <div className="position-map-card">
-      <div className="position-map-copy compact-title-help">
-        <strong>{t('positionMapTitle')}</strong>
-        <HelpTip text={t('positionMapHint')} />
-      </div>
-      <div
-        ref={mapRef}
-        className="position-map-canvas"
-        style={{ aspectRatio: `${Math.max(1, Math.round(maxX))} / ${Math.max(1, Math.round(maxY))}` }}
-        onPointerDown={beginDrag}
-        onPointerMove={(event) => event.buttons === 1 && updateFromPointer(event)}
-      >
-        <div className="position-map-grid" />
-        <div className="position-map-safe-area" />
-        <div className="position-map-axis x-axis">max X {Math.round(maxX)}px</div>
-        <div className="position-map-axis y-axis">max Y {Math.round(maxY)}px</div>
-        <div className="position-map-popup" style={{ left, top, '--mock-popup-width': `${mockPopupWidth}px`, '--mock-popup-height': `${mockPopupHeight}px` }}>
-          <b>ClipAnchor</b>
-          <span>{t('dragHint')}</span>
-        </div>
-      </div>
-      <div className="position-map-footer">
-        <code>X {draft.x}px · Y {draft.y}px · max X {Math.round(maxX)}px · max Y {Math.round(maxY)}px</code>
-        <div className="button-row compact-actions">
-          <button className="soft-button" onClick={() => setDraft({ x: 24, y: 24 })}>{t('resetPosition')}</button>
-          <button className="primary-button" disabled={saving} onClick={save}>{saving ? '...' : t('confirmPosition')}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
+import { formatShortcutForDisplay, normalizeShortcutForStorage } from '../shortcutDisplay.js';
+import { AppearanceSection } from './settings/AppearanceSection.jsx';
+import { DataSection } from './settings/DataSection.jsx';
+import { PositionMap } from './settings/PositionMap.jsx';
+import { PrivacySection } from './settings/PrivacySection.jsx';
+import { captureShortcut, HelpTip, SettingName, SettingsSoftDialog, Switch } from './settings/widgets.jsx';
 
 const shortcutLabels = {
   toggle_pin_service: 'shortcutPinService',
   toggle_history_service: 'shortcutHistoryService',
   toggle_main_window: 'shortcutMainWindow',
   enter_light_mode: 'shortcutLiteMode',
-  toggle_theme_mode: 'shortcutThemeMode'
+  toggle_theme_mode: 'shortcutThemeMode',
+  toggle_clipboard_pause: 'shortcutClipboardPause'
 };
 
 const defaultShortcuts = {
@@ -293,7 +23,8 @@ const defaultShortcuts = {
   toggle_history_service: 'Ctrl+Shift+H',
   toggle_main_window: 'Ctrl+Shift+X',
   enter_light_mode: 'Ctrl+Shift+L',
-  toggle_theme_mode: 'Ctrl+Shift+T'
+  toggle_theme_mode: 'Ctrl+Shift+T',
+  toggle_clipboard_pause: 'Ctrl+Shift+S'
 };
 
 const shortcutOrder = [
@@ -301,7 +32,8 @@ const shortcutOrder = [
   'toggle_history_service',
   'toggle_main_window',
   'enter_light_mode',
-  'toggle_theme_mode'
+  'toggle_theme_mode',
+  'toggle_clipboard_pause'
 ];
 
 function shortcutConflictMessage(conflict, t) {
@@ -327,6 +59,14 @@ function normalizeSettings(value) {
     ...value,
     locale: value?.locale === 'auto' ? 'auto' : (normalizeLocaleCode(value?.locale || 'auto') || 'auto'),
     auto_update_enabled: value?.auto_update_enabled !== false,
+    clipboard_paused: Boolean(value?.clipboard_paused),
+    privacy_filter_mode: value?.privacy_filter_mode === 'off' || value?.privacy_filter_mode === 'light'
+      ? value.privacy_filter_mode
+      : (value?.privacy_mode ? 'light' : 'off'),
+    privacy_mode: (value?.privacy_filter_mode === 'off' || value?.privacy_filter_mode === 'light' ? value.privacy_filter_mode : (value?.privacy_mode ? 'light' : 'off')) !== 'off',
+    filter_text: value?.filter_text !== false,
+    filter_image: value?.filter_image !== false,
+    filter_file: value?.filter_file !== false,
     translation_api_provider: provider,
     translation_api_url: getTranslationProvider(provider).endpoint,
     translation_api_key: activeKey,
@@ -352,36 +92,6 @@ function formatAutostartError(error, t) {
   if (!isMacLoginItemError) return detail || String(error || '');
   const template = t('macosLoginItemError');
   return template.replace('{detail}', detail || t('unknownError'));
-}
-
-function SettingsSoftDialog({ dialog, t, onClose }) {
-  if (!dialog) return null;
-  const DialogIcon = dialog.icon === 'warning' ? TriangleAlert : HelpCircle;
-  async function runConfirm() {
-    const action = dialog.onConfirm;
-    onClose();
-    if (action) await action();
-  }
-  async function runCancel() {
-    const action = dialog.onCancel;
-    onClose();
-    if (action) await action();
-  }
-  return (
-    <div className="soft-modal-backdrop settings-dialog-backdrop" role="presentation" onClick={onClose}>
-      <section className={`soft-modal-card settings-dialog-card ${dialog.danger ? 'danger' : ''} ${dialog.wide ? 'wide' : ''}`} role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
-        <span className={`settings-dialog-icon ${dialog.icon === 'warning' ? 'warning' : ''}`}><DialogIcon size={19} /></span>
-        <div className="settings-dialog-copy">
-          <strong>{dialog.title}</strong>
-          <p>{dialog.message}</p>
-        </div>
-        <div className="settings-dialog-actions">
-          {dialog.kind === 'confirm' ? <button className="soft-button" onClick={runCancel}>{dialog.cancelLabel || t('cancel')}</button> : null}
-          <button className={dialog.danger ? 'soft-button danger-line' : 'primary-button'} onClick={dialog.kind === 'confirm' ? runConfirm : onClose}>{dialog.confirmLabel || t('ok')}</button>
-        </div>
-      </section>
-    </div>
-  );
 }
 
 
@@ -457,7 +167,6 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
   const [settings, setSettings] = useState(() => normalizeSettings(boot.settings));
   const [dataUsage, setDataUsage] = useState(null);
   const [logStatus, setLogStatus] = useState(null);
-  const [smartNoticeOpen, setSmartNoticeOpen] = useState(false);
   const [cleanupDays, setCleanupDays] = useState(30);
   const [cleanupPreservePinned, setCleanupPreservePinned] = useState(true);
   const [settingsDialog, setSettingsDialog] = useState(null);
@@ -1119,189 +828,51 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
             <label className="setting-row"><SettingName help={t('helpPinService')}>{t('pinService')}</SettingName><Switch checked={settings.pin_service_enabled} onChange={(v) => toggleService('pin_service_enabled', v)} /></label>
             <label className="setting-row"><SettingName help={t('helpHistoryService')}>{t('historyService')}</SettingName><Switch checked={settings.history_service_enabled} onChange={(v) => toggleService('history_service_enabled', v)} /></label>
             <label className="setting-row"><SettingName help={t('helpAutoHide')}>{t('autoHide')}</SettingName><Switch checked={settings.auto_hide_actions} onChange={(v) => update({ auto_hide_actions: v })} /></label>
-            <label className="setting-row setting-row-segmented privacy-filter-row"><SettingName help={t('helpPrivacy')}>{t('privacyMode')}</SettingName><Segmented value={settings.privacy_filter_mode || (settings.privacy_mode ? 'light' : 'off')} options={[{ value: 'off', label: t('privacyOffMode') }, { value: 'light', label: t('privacyLightMode') }, { value: 'smart', label: t('privacySmartMode') }]} onChange={async (mode) => { const normalized = mode === 'smart' ? 'light' : mode; if (mode === 'smart') { setSmartNoticeOpen(true); } const saved = await api.setPrivacyFilterMode(normalized); setSettings(normalizeSettings(saved)); onBootChange({ ...boot, settings: normalizeSettings(saved) }); }} /></label>
             <label className="setting-row"><SettingName help={t('helpAutoStart')}>{t('autoStart')}</SettingName><Switch checked={settings.auto_start} onChange={toggleAutostart} /></label>
           </div>
         </div>
 
-        <div className="settings-card wide accent-card">
-          <h2><Palette size={18} /> {t('appearance')}</h2>
-          <div className="appearance-controls">
-            <div className="appearance-basic-grid">
-              <div className="control-row language-control-row appearance-language-card"><SettingName help={t('helpLanguage')}>{t('language')}</SettingName><Segmented className="language-segmented" value={['auto', 'en', 'zh'].includes(settings.locale) ? settings.locale : ''} onChange={chooseLocale} options={coreLanguageOptions} /></div>
-              <label className="control-row appearance-theme-card"><SettingName help={t('helpTheme')}>{t('theme')}</SettingName><Segmented value={settings.theme} onChange={(v) => update({ theme: v }).catch((error) => showSettingsAlert(t('theme'), String(error)))} options={[{ value: 'system', label: t('system') }, { value: 'dark', label: t('dark') }, { value: 'light', label: t('light') }]} /></label>
-              <label className="control-row appearance-animation-card"><SettingName help={t('helpAnimation')}>{t('animation')}</SettingName><Segmented value={settings.animation_mode} onChange={(v) => update({ animation_mode: v })} options={[{ value: 'elegant', label: t('elegant') }, { value: 'performance', label: t('performance') }]} /></label>
-            </div>
-            <div className="language-extension-panel">
-              <div className="language-pack-heading">
-                <span>{t('languagePackOther')}</span>
-                <small>{t('translationApiNotice')}</small>
-              </div>
-              <p className="language-pack-warning">{t('languagePackUnofficialUserNotice')}</p>
-              {extraLanguageOptions.length ? (
-                <div className="language-pack-grid" role="radiogroup" aria-label={t('languagePackOther')}>
-                  {/* 扩展语言卡片把名称、代号和切换状态拆成独立层级，是为了避免操作按钮挤压主要信息。 */}
-                  {/* Extra-language cards separate the name, code, and switch state so action buttons cannot compress the primary information. */}
-                  {extraLanguageOptions.map((language) => {
-                    const active = settings.locale === language.code;
-                    const displayName = language.nativeName || language.label || language.code;
-                    const integrity = language.integrity || 'complete';
-                    const unavailable = integrity === 'corrupt';
-                    const updateAvailable = ['incomplete', 'update_available'].includes(integrity);
-                    return (
-                      <div key={language.code} className={`language-pack-option ${active ? 'active' : ''} ${unavailable ? 'has-warning' : ''} ${updateAvailable ? 'has-update' : ''}`}>
-                        <button type="button" className="language-pack-select" role="radio" aria-checked={active} title={displayName} onClick={() => chooseExtraLanguage(language)}>
-                          <span className="language-pack-check" aria-hidden="true" />
-                          <span className="language-pack-main">
-                            <span className="language-pack-title-row">
-                              <strong>{displayName}</strong>
-                              <small className={`language-pack-code ${unavailable ? 'error-state' : updateAvailable ? 'update-state' : ''}`}>
-                                {language.code}
-                                {unavailable ? (
-                                  <TriangleAlert size={12} title={t('languageIntegrityCorrupt').replace('{language}', displayName)} aria-label={t('languagePackErrorWarning')} />
-                                ) : updateAvailable ? (
-                                  <RefreshCw size={12} title={t('languageIntegrityWarning')} aria-label={t('languagePackUpdateWarning')} />
-                                ) : null}
-                              </small>
-                            </span>
-                            <span className="language-pack-state">{active ? t('languagePackActive') : t('languagePackClickToUse')}</span>
-                          </span>
-                        </button>
-                        <span className="language-pack-actions">
-                          <button type="button" className="language-pack-refresh" disabled={languageGenerationState.busy} title={t('languageRefreshAction')} aria-label={t('languageRefreshAction')} onClick={() => regenerateLanguagePack(language)}>
-                            <RefreshCw size={14} />
-                          </button>
-                          <button type="button" className="language-pack-delete" disabled={languageGenerationState.busy} title={t('languageDeleteAction')} aria-label={t('languageDeleteAction')} onClick={() => deleteLanguagePack(language)}>
-                            <Trash2 size={14} />
-                          </button>
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="language-pack-empty" aria-disabled="true">{t('languagePackNone')}</div>
-              )}
-              <div className="language-generator-box">
-                <div>
-                  <strong>{t('languageGeneratorTitle')}</strong>
-                  <p>{t('languageGeneratorHint')}</p>
-                </div>
-                <section className="translation-service-panel" aria-label={t('translationApiSettingsTitle')}>
-                  <div className="translation-service-panel__heading">
-                    <strong>{t('translationApiSettingsTitle')}</strong>
-                    <small>{t('translationApiSettingsHint')}</small>
-                  </div>
-                  <div className="translation-service-panel__controls">
-                    <div className="translation-service-panel__field translation-service-panel__provider">
-                      <span className="translation-service-panel__label">{t('translationProviderField')}</span>
-                      <DropdownSelect
-                        value={normalizeTranslationProvider(settings.translation_api_provider, settings.translation_api_url)}
-                        disabled={languageGenerationState.busy}
-                        ariaLabel={t('translationProviderField')}
-                        onChange={saveTranslationProvider}
-                        options={[
-                          { value: 'mymemory', label: t('translationProviderMyMemory') },
-                          { value: 'uapis', label: t('translationProviderUapis') }
-                        ]}
-                      />
-                    </div>
-                    <div className="translation-service-panel__field translation-service-panel__key">
-                      <span className="translation-service-panel__label">{t('translationApiKeyField')}</span>
-                      <div className="translation-service-panel__key-row">
-                        <input
-                          type="password"
-                          aria-label={t('translationApiKeyField')}
-                          value={activeTranslationProvider.supportsApiKey ? translationApiKeyDraft : ''}
-                          disabled={languageGenerationState.busy || !activeTranslationProvider.supportsApiKey}
-                          placeholder={activeTranslationProvider.supportsApiKey ? t('translationApiKeyPlaceholder') : t('translationApiKeyUnavailable')}
-                          autoComplete="off"
-                          spellCheck="false"
-                          onChange={(event) => setTranslationApiKeyDraft(event.target.value)}
-                          onPaste={(event) => {
-                            const pasted = event.clipboardData?.getData('text');
-                            if (typeof pasted !== 'string') return;
-                            event.preventDefault();
-                            applyPastedTranslationApiKey(pasted);
-                          }}
-                          onBlur={() => saveTranslationApiKey()}
-                          onKeyDown={(event) => {
-                            if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'v') {
-                              event.preventDefault();
-                              pasteTranslationApiKey();
-                              return;
-                            }
-                            if (event.key === 'Enter') event.currentTarget.blur();
-                          }}
-                        />
-                        <button className="soft-button paste-api-key-button" type="button" disabled={languageGenerationState.busy || !activeTranslationProvider.supportsApiKey} onClick={pasteTranslationApiKey}>{t('translationApiKeyPaste')}</button>
-                        <button className="soft-button clear-api-key-button" type="button" disabled={languageGenerationState.busy || !activeTranslationProvider.supportsApiKey || !translationApiKeyDraft} onClick={clearTranslationApiKey}>{t('translationApiKeyClear')}</button>
-                      </div>
-                    </div>
-                  </div>
-                </section>
-                <div className="language-generator-actions">
-                  <input value={languageCodeDraft} onChange={(event) => setLanguageCodeDraft(event.target.value)} placeholder={t('languageCodePlaceholder')} />
-                  <button className="primary-button" type="button" disabled={languageGenerationState.busy} onClick={generateLanguagePack}>{languageGenerationState.busy ? t('generatingLanguage') : t('generateLanguage')}</button>
-                  <button className="soft-button reset-api-button" type="button" disabled={languageGenerationState.busy} onClick={resetTranslationProvider}><RotateCcw size={13} />{t('translationApiReset')}</button>
-                </div>
-                {languageGenerationState.busy && languageGenerationState.total ? (
-                  <div className="language-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={languageGenerationState.percent}>
-                    <div className="language-progress-meta">
-                      <span>{languageGenerationState.message}</span>
-                      <b>{t('languageProgressPercent').replace('{percent}', String(languageGenerationState.percent))}</b>
-                    </div>
-                    <span className="language-progress-track"><i style={{ width: `${languageGenerationState.percent}%` }} /></span>
-                  </div>
-                ) : null}
-                <div className="language-folder-block">
-                  <label className="vertical language-folder-field">
-                    <SettingName>{t('languagePackFolderLabel')}</SettingName>
-                    <input
-                      className="portable-path-input"
-                      readOnly
-                      dir="ltr"
-                      spellCheck="false"
-                      value={languagePackFolderPath}
-                      title={languagePackFolderPath}
-                      onFocus={selectPortablePath}
-                      onDoubleClick={selectPortablePath}
-                    />
-                  </label>
-                  <div className="language-folder-actions">
-                    <button className="soft-button open-language-folder-button" type="button" onClick={openLanguagePackFolder}><FolderOpen size={15} /> {t('openLanguagePackFolder')}</button>
-                    <button
-                      className="soft-button reload-language-folder-button"
-                      type="button"
-                      disabled={languageReloadState.busy || languageGenerationState.busy}
-                      title={t('reloadLanguagePacks')}
-                      aria-label={t('reloadLanguagePacks')}
-                      onClick={reloadLanguagePacks}
-                    >
-                      <RefreshCw className={languageReloadState.busy ? 'is-spinning' : ''} size={15} />
-                      {languageReloadState.busy ? t('reloadingLanguagePacks') : t('reloadLanguagePacks')}
-                    </button>
-                  </div>
-                  {languageReloadState.message ? (
-                    <p className={`language-reload-status ${languageReloadState.error ? 'error' : ''}`} role="status">
-                      {languageReloadState.message}
-                    </p>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <PrivacySection
+          t={t}
+          settings={settings}
+          onPauseChange={async (paused) => { const saved = await api.setClipboardPaused(paused); setSettings(normalizeSettings(saved)); onBootChange({ ...boot, settings: normalizeSettings(saved) }); }}
+          onPrivacyModeChange={async (mode) => { const saved = await api.setPrivacyFilterMode(mode); setSettings(normalizeSettings(saved)); onBootChange({ ...boot, settings: normalizeSettings(saved) }); }}
+          onFilterChange={(patch) => update(patch)}
+        />
 
-        <div className="settings-card wide runtime-card">
-          <h2><Clock3 size={18} /> {t('sizingAndTiming')}</h2>
-          <div className="range-grid runtime-grid sizing-grid">
-            <label className="scale-step-row"><SettingName help={t('helpUiScale')}>{t('scale')}</SettingName><Stepper value={uiScale} min={50} max={200} step={5} suffix="%" onChange={setUiScale} onReset={() => setUiScale(100)} resetLabel={t('resetScale')} /></label>
-            <label className="scale-step-row"><SettingName help={t('helpPopupScale')}>{t('popupScale')}</SettingName><Stepper value={Number(settings.popup_scale_percent || 100)} min={50} max={200} step={5} suffix="%" onChange={setPopupScale} onReset={() => setPopupScale(100)} resetLabel={t('resetScale')} /></label>
-            <label><SettingName help={t('helpAutoDestroy')}>{t('autoDestroy')} <b>{settings.auto_destroy_seconds}s</b></SettingName><input type="range" min="2" max="60" value={settings.auto_destroy_seconds} onChange={(e) => update({ auto_destroy_seconds: Number(e.target.value) })} /></label>
-            <label><SettingName help={t('helpLiteDelay')}>{t('liteDelay')} <b>{settings.light_mode_minutes}m</b></SettingName><input type="range" min="1" max="180" value={settings.light_mode_minutes} onChange={(e) => update({ light_mode_minutes: Number(e.target.value) })} /></label>
-          </div>
-        </div>
+        <AppearanceSection
+          t={t}
+          settings={settings}
+          update={update}
+          chooseLocale={chooseLocale}
+          coreLanguageOptions={coreLanguageOptions}
+          extraLanguageOptions={extraLanguageOptions}
+          languageGenerationState={languageGenerationState}
+          languageCodeDraft={languageCodeDraft}
+          setLanguageCodeDraft={setLanguageCodeDraft}
+          generateLanguagePack={generateLanguagePack}
+          regenerateLanguagePack={regenerateLanguagePack}
+          chooseExtraLanguage={chooseExtraLanguage}
+          deleteLanguagePack={deleteLanguagePack}
+          normalizeTranslationProvider={normalizeTranslationProvider}
+          saveTranslationProvider={saveTranslationProvider}
+          activeTranslationProvider={activeTranslationProvider}
+          translationApiKeyDraft={translationApiKeyDraft}
+          setTranslationApiKeyDraft={setTranslationApiKeyDraft}
+          applyPastedTranslationApiKey={applyPastedTranslationApiKey}
+          saveTranslationApiKey={saveTranslationApiKey}
+          pasteTranslationApiKey={pasteTranslationApiKey}
+          clearTranslationApiKey={clearTranslationApiKey}
+          resetTranslationProvider={resetTranslationProvider}
+          languagePackFolderPath={languagePackFolderPath}
+          openLanguagePackFolder={openLanguagePackFolder}
+          languageReloadState={languageReloadState}
+          reloadLanguagePacks={reloadLanguagePacks}
+          uiScale={uiScale}
+          setUiScale={setUiScale}
+          setPopupScale={setPopupScale}
+          showSettingsAlert={showSettingsAlert}
+        />
 
         {globalShortcutsSupported ? (
           <div className="settings-card wide shortcut-card">
@@ -1365,62 +936,27 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
           </div>
         ) : null}
 
-        <div className="settings-card wide data-card full-data-card">
-          <h2><Database size={18} /> {t('data')}</h2>
-          <div className="data-management-primary-row">
-            <div className="data-summary-strip"><span>{t('dataUsage')}</span><strong>{dataUsage?.display || '...'}</strong></div>
-            <label className="scale-step-row history-limit-row"><SettingName help={t('helpHistoryLimit')}>{t('historyLimit')}</SettingName><Stepper value={historyLimit} min={0} max={10000} step={100} suffix={historyLimit === 0 ? ` ${t('unlimited')}` : ''} onChange={setHistoryLimit} onReset={() => setHistoryLimit(0)} resetLabel={t('resetScale')} /></label>
-          </div>
-          <label className="vertical database-path-field"><SettingName>{t('dbPath')}</SettingName><input className="portable-path-input" readOnly dir="ltr" spellCheck="false" value={boot.paths.database} title={boot.paths.database} onFocus={selectPortablePath} onDoubleClick={selectPortablePath} /></label>
-          <div className="old-history-cleanup">
-            <label className="cleanup-days-field"><SettingName help={t('helpDeleteBeforeDays')}>{t('deleteBeforeDays')}</SettingName><input type="number" min="1" step="1" value={cleanupDays} onChange={(event) => setCleanupDays(event.target.value)} /></label>
-            <label className="setting-row cleanup-preserve-toggle"><SettingName>{t('preserveFavorites')}</SettingName><Switch checked={cleanupPreservePinned} onChange={setCleanupPreservePinned} /></label>
-            <button className="soft-button danger-line" onClick={deleteBeforeDays}>{t('deleteBeforeDaysAction').replace('{days}', String(Math.max(1, Math.floor(Number(cleanupDays) || 1))))}</button>
-          </div>
-          <div className="data-actions-layout">
-            <div className="button-row data-actions-main import-export-actions">
-              <button className="soft-button" onClick={() => exportHistory('json')}><Download size={16} /> {t('exportJson')}</button>
-              <button className="soft-button" onClick={() => exportHistory('csv')}><Download size={16} /> {t('exportCsv')}</button>
-              <button className="soft-button" onClick={() => importHistory('json')}><Upload size={16} /> {t('importJson')}</button>
-              <button className="soft-button" onClick={() => importHistory('csv')}><Upload size={16} /> {t('importCsv')}</button>
-            </div>
-            <div className="button-row danger-actions compact-danger-actions">
-              <button className="soft-button danger-line" title={t('helpClearNonPinned')} onClick={() => clearData(true)}>{t('clearNonPinned')}</button>
-              <button className="soft-button danger-line force-clear" title={t('helpForceClear')} onClick={() => clearData(false)}>{t('clearIncludingPinned')}</button>
-            </div>
-          </div>
-        </div>
-
-        <div className="settings-card wide log-card">
-          <h2><Database size={18} /> {t('logManagement')}</h2>
-          <div className="log-management-panel">
-            <div className="log-management-header">
-              <div className="log-management-copy">
-                <strong>{t('logManagementTitle')}</strong>
-                <div className="log-management-hint-lines">
-                  {logManagementHintLines.map((line, index) => <p key={`${index}-${line}`}>{line}</p>)}
-                </div>
-              </div>
-              <span className="log-size-pill">{logStatus?.display_size || '...'}</span>
-            </div>
-            <div className="log-control-grid">
-              <label className="scale-step-row log-retention-row"><SettingName help={t('helpLogRetentionDays')}>{t('logRetentionDays')}</SettingName><Stepper value={logRetentionDays} min={1} max={90} step={1} suffix={` ${t('days')}`} onChange={updateLogRetentionDays} onReset={() => updateLogRetentionDays(7)} resetLabel={t('resetScale')} /></label>
-              <label className="vertical log-path-field"><SettingName>{t('logPath')}</SettingName><input className="portable-path-input" readOnly dir="ltr" spellCheck="false" value={logStatus?.directory || boot.paths.logs || ''} title={logStatus?.directory || boot.paths.logs || ''} onFocus={selectPortablePath} onDoubleClick={selectPortablePath} /></label>
-            </div>
-            <div className="log-file-strip">
-              {(logStatus?.files || []).slice(0, 3).map((file) => (
-                <span key={file.path} title={file.path}>{file.name} · {file.display_size}</span>
-              ))}
-              {(logStatus?.files || []).length === 0 ? <span>{t('noLogFiles')}</span> : null}
-            </div>
-            <div className="button-row log-actions">
-              <button className="soft-button" onClick={openLogFolder}><FolderOpen size={16} /> {t('openLogFolder')}</button>
-              <button className="soft-button" onClick={refreshUsage}><RotateCcw size={16} /> {t('refreshLogs')}</button>
-              <button className="soft-button danger-line" onClick={clearLogFiles}><Trash2 size={16} /> {t('clearLogs')}</button>
-            </div>
-          </div>
-        </div>
-
+        <DataSection
+          t={t}
+          boot={boot}
+          dataUsage={dataUsage}
+          historyLimit={historyLimit}
+          setHistoryLimit={setHistoryLimit}
+          cleanupDays={cleanupDays}
+          setCleanupDays={setCleanupDays}
+          cleanupPreservePinned={cleanupPreservePinned}
+          setCleanupPreservePinned={setCleanupPreservePinned}
+          deleteBeforeDays={deleteBeforeDays}
+          exportHistory={exportHistory}
+          importHistory={importHistory}
+          clearData={clearData}
+          logManagementHintLines={logManagementHintLines}
+          logStatus={logStatus}
+          updateLogRetentionDays={updateLogRetentionDays}
+          openLogFolder={openLogFolder}
+          refreshUsage={refreshUsage}
+          clearLogFiles={clearLogFiles}
+        />
 
         <div className="settings-card wide version-card">
           <h2><BadgeCheck size={18} /> {t('versionAndUpdates')}</h2>
@@ -1439,15 +975,6 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
         </div>
       </div>
       <SettingsSoftDialog dialog={settingsDialog} t={t} onClose={() => setSettingsDialog(null)} />
-      {smartNoticeOpen ? (
-        <div className="soft-modal-backdrop" role="presentation" onClick={() => setSmartNoticeOpen(false)}>
-          <section className="soft-modal-card privacy-smart-card" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
-            <strong>{t('privacySmartTitle')}</strong>
-            <p>{t('privacySmartUnavailable')}</p>
-            <button className="primary-button" onClick={() => setSmartNoticeOpen(false)}>{t('ok')}</button>
-          </section>
-        </div>
-      ) : null}
     </section>
   );
 }
