@@ -320,7 +320,7 @@ The manual **Check update** button opens an in-app status card immediately and c
 
 Asset selection is automatic:
 
-- Windows prefers MSI packages such as `ClipAnchor_Windows_x64.msi` for unattended replacement because they expose standard silent install arguments; EXE installers remain a compatible fallback.
+- Windows in-app updates use the NSIS installer `ClipAnchor_Windows_x64.exe` (`/S`; portable layouts also pass `/D=` to the current directory). Silent MSI is not used: a leftover WiX product plus a cache SourceList makes unattended `msiexec` fail with 1603. MSI may still be built for manual install. The `release-v0.7.5` GitHub Release must not attach `.msi`, so 0.7.3/0.7.4 clients (which still prefer MSI) will download the EXE instead. After a successful NSIS update, do not uninstall a leftover ClipAnchor entry in Windows Apps if the app still lives in a portable folder; that old WiX product can delete those files.
 - macOS uses DMG and filters architecture-specific filenames so Apple Silicon selects ARM64 or universal packages rather than Intel-only packages.
 - Linux selects DEB or RPM according to the distribution family.
 

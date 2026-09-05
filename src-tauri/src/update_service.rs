@@ -470,31 +470,21 @@ fn select_asset_for_current_system(assets: &[GitHubAsset]) -> Option<GitHubAsset
     ranked.into_iter().next().map(|(_, asset)| asset)
 }
 
-fn asset_score(asset: &GitHubAsset, platform: &PlatformKind, arch: &str, lang: &str, linux_package: &LinuxPackageKind) -> Option<i32> {
+fn asset_score(asset: &GitHubAsset, platform: &PlatformKind, arch: &str, _lang: &str, linux_package: &LinuxPackageKind) -> Option<i32> {
     let name = asset.name.to_lowercase();
     let extension = Path::new(&asset.name).extension()?.to_string_lossy().to_lowercase();
     let mut score = 0i32;
 
     match platform {
         PlatformKind::Windows => {
-            if extension == "msi" {
-                // MSI 有标准静默参数和退出码，更适合作为无人值守覆盖更新的首选包；EXE 仍作为兼容兜底。
-                // MSI has standard silent arguments and exit codes, making it the preferred unattended update package while EXE remains a compatible fallback.
-                score += 760;
-            } else if extension == "exe" {
-                score += 650;
-            } else {
+            if extension != "exe" {
+                // 应用内更新只选 NSIS EXE。静默 MSI 大升级在便携目录会因坏 SourceList 变成 1603。
+                // In-app updates select NSIS EXE only. Silent MSI major upgrades hit 1603 on portable layouts via a broken SourceList.
                 return None;
             }
+            score += 760;
             if contains_any(&name, &["windows", "win"]) {
                 score += 120;
-            }
-            if extension == "msi" {
-                if lang.starts_with("zh") && contains_any(&name, &["zh-cn", "zh_cn", "simpchinese", "chinese"]) {
-                    score += 80;
-                } else if !lang.starts_with("zh") && contains_any(&name, &["en-us", "en_us", "english"]) {
-                    score += 80;
-                }
             }
         }
         PlatformKind::Macos => {
@@ -573,39 +563,12 @@ fn is_portable_windows_layout(exe: &Path, data_dir: &Path) -> bool {
     parent.join("data") == data_dir
 }
 
-#[cfg(test)]
-fn installer_compressed_guid(product_code: &str) -> Option<String> {
-    let hex: String = product_code
-        .chars()
-        .filter(|ch| ch.is_ascii_hexdigit())
-        .map(|ch| ch.to_ascii_uppercase())
-        .collect();
-    if hex.len() != 32 {
-        return None;
-    }
-    let bytes = hex.as_bytes();
-    let reverse_range = |start: usize, len: usize| -> String {
-        bytes[start..start + len].iter().copied().rev().map(char::from).collect()
-    };
-    let mut packed = String::with_capacity(32);
-    packed.push_str(&reverse_range(0, 8));
-    packed.push_str(&reverse_range(8, 4));
-    packed.push_str(&reverse_range(12, 4));
-    let mut index = 16;
-    while index < 32 {
-        packed.push(char::from(bytes[index + 1]));
-        packed.push(char::from(bytes[index]));
-        index += 2;
-    }
-    Some(packed)
-}
-
 #[cfg(any(test, target_os = "windows"))]
 fn published_installer_file_name(path: &Path) -> String {
     let name = path
         .file_name()
         .map(|value| value.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "ClipAnchor.msi".into());
+        .unwrap_or_else(|| "ClipAnchor.exe".into());
     const PREFIX_LEN: usize = 16;
     if name.len() > PREFIX_LEN + 1
         && name.as_bytes()[PREFIX_LEN] == b'-'
@@ -916,8 +879,8 @@ fn install_windows_package_update(paths: &DataPaths, installer_path: &Path, expe
         .and_then(|value| value.to_str())
         .unwrap_or_default()
         .to_lowercase();
-    if !matches!(extension.as_str(), "exe" | "msi") {
-        return Err("Windows update package must be an EXE or MSI installer".into());
+    if extension != "exe" {
+        return Err("Windows update package must be an NSIS EXE installer".into());
     }
 
     let installer_path = win32_usable_path(installer_path);
@@ -971,9 +934,16 @@ fn windows_installer_script(
     let portable_root_literal = portable_root
         .map(|path| powershell_literal(&fs_guard::strip_verbatim_prefix(path).to_string_lossy()))
         .unwrap_or_else(|| "$null".into());
+    // /D= 必须在参数末尾且不能加引号；便携布局才写入这段，避免非便携脚本里出现 /D=。
+    // /D= must be last and unquoted; emit it only for portable layouts so non-portable scripts contain no /D=.
+    let nsis_arguments = if portable_root.is_some() {
+        r#"  $dest = (Resolve-Win32Path ([string]$InstallDir)).TrimEnd('\')
+  $psi.Arguments = "/S /NS /D=$dest""#
+    } else {
+        r#"  $psi.Arguments = '/S'"#
+    };
     format!(
         r###"
-param([switch]$ElevatedMsiInstall)
 $ErrorActionPreference = 'Stop'
 $InstallerPath = {installer}
 $InstallerPackageName = {installer_name}
@@ -984,7 +954,6 @@ $ExpectedVersion = {expected_version}
 $AppPid = {pid}
 $InstallerExtension = [System.IO.Path]::GetExtension($InstallerPath).TrimStart('.').ToLowerInvariant()
 $ProcessName = [System.IO.Path]::GetFileNameWithoutExtension($CurrentExe)
-$MsiLogFile = Join-Path (Split-Path -Parent $LogFile) 'windows-msiexec.log'
 function Write-UpdateLog([string]$Message) {{
   $directory = Split-Path -Parent $LogFile
   if ($directory -and -not (Test-Path -LiteralPath $directory)) {{ New-Item -ItemType Directory -Force -Path $directory | Out-Null }}
@@ -1045,11 +1014,6 @@ function Wait-ForClipAnchorExit {{
   }}
   throw "ClipAnchor did not exit before installer timeout"
 }}
-function Quote-ProcessArg([string]$Value) {{
-  if ($null -eq $Value) {{ return '""' }}
-  if ($Value -notmatch '[\s"]') {{ return $Value }}
-  return '"' + ($Value -replace '"', '\"') + '"'
-}}
 function Resolve-Win32Path([string]$Path) {{
   if ($Path.StartsWith('\\?\UNC\')) {{ return '\\' + $Path.Substring(8) }}
   if ($Path.StartsWith('\\?\')) {{ return $Path.Substring(4) }}
@@ -1066,130 +1030,33 @@ function Copy-InstallerForWindowsInstaller([string]$Source, [string]$PackageName
   Write-UpdateLog "staged installer at $dest"
   return $dest
 }}
-function ConvertTo-InstallerPackedGuid([string]$ProductCode) {{
-  $hex = ($ProductCode.ToUpperInvariant() -replace '[^0-9A-F]', '')
-  if ($hex.Length -ne 32) {{ return $null }}
-  $reverse = {{ param($value) -join ([char[]]$value)[($value.Length - 1)..0] }}
-  $packed = (& $reverse $hex.Substring(0, 8)) + (& $reverse $hex.Substring(8, 4)) + (& $reverse $hex.Substring(12, 4))
-  for ($i = 16; $i -lt 32; $i += 2) {{
-    $packed += $hex.Substring($i + 1, 1) + $hex.Substring($i, 1)
-  }}
-  return $packed
-}}
-function Get-ClipAnchorProductCodes {{
-  $codes = New-Object System.Collections.Generic.List[string]
-  $roots = @(
-    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
-    'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall',
-    'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
-  )
-  foreach ($root in $roots) {{
-    if (-not (Test-Path -LiteralPath $root)) {{ continue }}
-    foreach ($key in Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue) {{
-      try {{
-        $props = Get-ItemProperty -LiteralPath $key.PSPath -ErrorAction Stop
-      }} catch {{
-        continue
-      }}
-      $name = [string]$props.DisplayName
-      if ($name -notmatch 'ClipAnchor') {{ continue }}
-      foreach ($candidate in @($key.PSChildName, [string]$props.UninstallString, [string]$props.ModifyPath)) {{
-        if ($candidate -match '{{[0-9A-Fa-f]{{8}}-[0-9A-Fa-f]{{4}}-[0-9A-Fa-f]{{4}}-[0-9A-Fa-f]{{4}}-[0-9A-Fa-f]{{12}}}}') {{
-          $code = $Matches[0].ToUpperInvariant()
-          if (-not $codes.Contains($code)) {{ $codes.Add($code) }}
-        }}
-      }}
-    }}
-  }}
-  return $codes
-}}
-function Repair-ClipAnchorInstallerSources {{
-  $codes = @(Get-ClipAnchorProductCodes)
-  Write-UpdateLog ("repairing installer SourceList for " + $codes.Count + " ClipAnchor product(s)")
-  foreach ($code in $codes) {{
-    $packed = ConvertTo-InstallerPackedGuid $code
-    if (-not $packed) {{ continue }}
-    $sourceLists = @(
-      "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Installer\UserData\S-1-5-18\Products\$packed\SourceList",
-      "HKLM:\SOFTWARE\Classes\Installer\Products\$packed\SourceList"
-    )
-    foreach ($sourceList in $sourceLists) {{
-      if (Test-Path -LiteralPath $sourceList) {{
-        Write-UpdateLog "removing installer SourceList $sourceList"
-        Remove-Item -LiteralPath $sourceList -Recurse -Force -ErrorAction SilentlyContinue
-      }}
-    }}
-  }}
-}}
-function Uninstall-ClipAnchorMsiProducts {{
-  $codes = @(Get-ClipAnchorProductCodes)
-  foreach ($code in $codes) {{
-    Write-UpdateLog "uninstalling previous ClipAnchor product $code"
-    $process = Start-Process -FilePath "$env:SystemRoot\System32\msiexec.exe" -ArgumentList @('/x', $code, '/qn', '/norestart') -Wait -PassThru -WindowStyle Hidden
-    $codeExit = 0
-    if ($null -ne $process) {{ $codeExit = [int]$process.ExitCode }}
-    Write-UpdateLog "uninstall $code finished with exit code $codeExit"
-  }}
-}}
-function Start-ElevatedAndWait([string]$FilePath, [string[]]$Arguments) {{
-  $argumentLine = ($Arguments | ForEach-Object {{ Quote-ProcessArg $_ }}) -join ' '
-  Write-UpdateLog "starting installer: $FilePath $argumentLine"
+function Start-NsisSilentInstall([string]$Installer, $InstallDir) {{
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = (Resolve-Win32Path $Installer)
+  $psi.UseShellExecute = $true
+  $psi.Verb = 'runas'
+  $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+{nsis_arguments}
+  Write-UpdateLog ("starting installer: " + $psi.FileName + " " + $psi.Arguments)
   try {{
-    $process = Start-Process -FilePath $FilePath -ArgumentList $argumentLine -Wait -PassThru -Verb RunAs -WindowStyle Hidden
+    $process = [System.Diagnostics.Process]::Start($psi)
   }} catch {{
     Write-UpdateLog "elevated installer start failed, retrying without WindowStyle: $($_.Exception.Message)"
-    $process = Start-Process -FilePath $FilePath -ArgumentList $argumentLine -Wait -PassThru -Verb RunAs
+    $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Normal
+    $process = [System.Diagnostics.Process]::Start($psi)
   }}
   if ($null -eq $process) {{ return 0 }}
+  $process.WaitForExit()
   return [int]$process.ExitCode
-}}
-function Install-ClipAnchorMsiPackage {{
-  $script:InstallerPath = Copy-InstallerForWindowsInstaller $InstallerPath $InstallerPackageName
-  Repair-ClipAnchorInstallerSources
-  Uninstall-ClipAnchorMsiProducts
-  $msiArgs = New-Object System.Collections.Generic.List[string]
-  [void]$msiArgs.Add('/i')
-  [void]$msiArgs.Add($InstallerPath)
-  [void]$msiArgs.Add('/qn')
-  [void]$msiArgs.Add('/norestart')
-  [void]$msiArgs.Add('MSINODISABLEMEDIA=1')
-  if ($PortableRoot) {{
-    [void]$msiArgs.Add(('INSTALLDIR=' + $PortableRoot))
-    [void]$msiArgs.Add(('APPLICATIONFOLDER=' + $PortableRoot))
-  }}
-  [void]$msiArgs.Add('/l*v')
-  [void]$msiArgs.Add($MsiLogFile)
-  $argumentLine = ($msiArgs | ForEach-Object {{ Quote-ProcessArg $_ }}) -join ' '
-  Write-UpdateLog "starting installer: $env:SystemRoot\System32\msiexec.exe $argumentLine"
-  $process = Start-Process -FilePath "$env:SystemRoot\System32\msiexec.exe" -ArgumentList $argumentLine -Wait -PassThru -WindowStyle Hidden
-  if ($null -eq $process) {{ return 0 }}
-  return [int]$process.ExitCode
-}}
-if ($ElevatedMsiInstall) {{
-  try {{
-    Write-UpdateLog 'Windows elevated MSI install started'
-    $exitCode = Install-ClipAnchorMsiPackage
-    Write-UpdateLog "installer finished with exit code $exitCode"
-    exit $exitCode
-  }} catch {{
-    Write-UpdateLog "Windows update apply failed: $($_.Exception.Message)"
-    exit 1
-  }}
 }}
 try {{
   Write-UpdateLog 'Windows update apply script started'
-  if ($InstallerExtension -eq 'msi') {{
-    if (-not (Test-Path -LiteralPath (Resolve-Win32Path $InstallerPath))) {{ throw "installer not found: $InstallerPath" }}
-    Wait-ForClipAnchorExit
-    if (-not $PSCommandPath) {{ throw "update script path is unavailable for elevated MSI install" }}
-    $exitCode = Start-ElevatedAndWait "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath, '-ElevatedMsiInstall')
-  }} elseif ($InstallerExtension -eq 'exe') {{
-    $InstallerPath = Copy-InstallerForWindowsInstaller $InstallerPath $InstallerPackageName
-    Wait-ForClipAnchorExit
-    $exitCode = Start-ElevatedAndWait $InstallerPath @('/S')
-  }} else {{
-    throw "unsupported installer extension: $InstallerExtension"
+  if ($InstallerExtension -ne 'exe') {{
+    throw "Windows in-app updates require an NSIS EXE installer; silent MSI is not used. Got: $InstallerExtension"
   }}
+  $InstallerPath = Copy-InstallerForWindowsInstaller $InstallerPath $InstallerPackageName
+  Wait-ForClipAnchorExit
+  $exitCode = Start-NsisSilentInstall $InstallerPath $PortableRoot
   Write-UpdateLog "installer finished with exit code $exitCode"
   if (@(0, 3010, 1641) -notcontains $exitCode) {{ throw "installer failed with exit code $exitCode" }}
   Start-Sleep -Seconds 2
@@ -1210,6 +1077,7 @@ try {{
         log_file = powershell_literal(&fs_guard::strip_verbatim_prefix(log_path).to_string_lossy()),
         expected_version = powershell_literal(expected_version),
         pid = app_pid,
+        nsis_arguments = nsis_arguments,
     )
 }
 
@@ -1768,25 +1636,70 @@ mod tests {
         assert_eq!(reconciled.status, "installing");
     }
 
+    fn github_asset(name: &str) -> GitHubAsset {
+        GitHubAsset {
+            name: name.into(),
+            browser_download_url: format!(
+                "https://github.com/SELFEMO/ClipAnchor/releases/download/release-v0.7.5/{name}"
+            ),
+            size: Some(1024),
+        }
+    }
+
+    fn windows_package_score(name: &str) -> Option<i32> {
+        asset_score(
+            &github_asset(name),
+            &PlatformKind::Windows,
+            "x64",
+            "en-us",
+            &LinuxPackageKind::Deb,
+        )
+    }
+
+    #[test]
+    fn windows_auto_update_ignores_msi_and_accepts_nsis_exe() {
+        assert_eq!(windows_package_score("ClipAnchor_Windows_x64.msi"), None);
+        assert!(windows_package_score("ClipAnchor_Windows_x64.exe").is_some());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_selects_nsis_exe_even_when_msi_is_published() {
+        let selected = select_asset_for_current_system(&[
+            github_asset("ClipAnchor_Windows_x64.msi"),
+            github_asset("ClipAnchor_Windows_x64.exe"),
+        ])
+        .expect("NSIS EXE should be selected");
+        assert_eq!(selected.name, "ClipAnchor_Windows_x64.exe");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_selects_nsis_exe_when_it_is_the_only_windows_package() {
+        let selected = select_asset_for_current_system(&[github_asset("ClipAnchor_Windows_x64.exe")])
+            .expect("NSIS EXE should be selected");
+        assert_eq!(selected.name, "ClipAnchor_Windows_x64.exe");
+    }
+
     #[test]
     fn published_installer_file_name_strips_update_cache_prefix() {
         assert_eq!(
             published_installer_file_name(Path::new(
-                r"D:\ClipAnchor\data\updates\00ec86e14365294b-ClipAnchor_windows_x64_zh-CN.msi"
+                r"D:\ClipAnchor\data\updates\00ec86e14365294b-ClipAnchor_Windows_x64.exe"
             )),
-            "ClipAnchor_windows_x64_zh-CN.msi"
+            "ClipAnchor_Windows_x64.exe"
         );
         assert_eq!(
-            published_installer_file_name(Path::new(r"D:\ClipAnchor\data\updates\ClipAnchor.msi")),
-            "ClipAnchor.msi"
+            published_installer_file_name(Path::new(r"D:\ClipAnchor\data\updates\ClipAnchor.exe")),
+            "ClipAnchor.exe"
         );
     }
 
     #[cfg(windows)]
     #[test]
-    fn windows_installer_script_uses_win32_path_and_versioned_restart() {
+    fn windows_installer_script_uses_nsis_silent_args_for_portable_layout() {
         let installer = Path::new(
-            r"\\?\D:\ClipAnchor\data\updates\00ec86e14365294b-ClipAnchor_windows_x64_zh-CN.msi",
+            r"\\?\D:\ClipAnchor\data\updates\00ec86e14365294b-ClipAnchor_Windows_x64.exe",
         );
         let current_exe = Path::new(r"\\?\D:\portable\clipanchor.exe");
         let log_path = Path::new(r"\\?\D:\ClipAnchor\data\logs\windows-update.log");
@@ -1795,25 +1708,24 @@ mod tests {
             current_exe,
             log_path,
             4242,
-            "0.7.1",
+            "0.7.5",
             Some(Path::new(r"D:\portable")),
         );
         assert!(script.contains(
-            r"D:\ClipAnchor\data\updates\00ec86e14365294b-ClipAnchor_windows_x64_zh-CN.msi"
+            r"D:\ClipAnchor\data\updates\00ec86e14365294b-ClipAnchor_Windows_x64.exe"
         ));
-        assert!(script.contains("$InstallerPackageName = 'ClipAnchor_windows_x64_zh-CN.msi'"));
+        assert!(script.contains("$InstallerPackageName = 'ClipAnchor_Windows_x64.exe'"));
         assert!(script.contains("$PortableRoot = 'D:\\portable'"));
-        assert!(script.contains("Repair-ClipAnchorInstallerSources"));
-        assert!(script.contains("SourceList"));
-        assert!(script.contains("MSINODISABLEMEDIA=1"));
-        assert!(script.contains("INSTALLDIR="));
-        assert!(script.contains("APPLICATIONFOLDER="));
+        assert!(script.contains("/S"));
+        assert!(script.contains("/NS"));
+        assert!(script.contains("/D="));
         assert!(script.contains("if ($PortableRoot -and $CurrentExe)"));
-        assert!(script.contains("-ElevatedMsiInstall"));
-        assert!(script.contains("/l*v"));
-        assert!(script.contains("windows-msiexec.log"));
-        assert!(script.contains("0.7.1"));
+        assert!(script.contains("0.7.5"));
         assert!(!script.contains("--portable"));
+        assert!(!script.contains("-ElevatedMsiInstall"));
+        assert!(!script.contains("MSINODISABLEMEDIA"));
+        assert!(!script.contains("msiexec"));
+        assert!(!script.contains("SourceList"));
         assert!(script.contains("Get-ExeVersion"));
         assert!(script.contains("Copy-InstallerForWindowsInstaller"));
         assert!(script.contains("$env:TEMP"));
@@ -1829,22 +1741,17 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn windows_installer_script_omits_installdir_without_portable_root() {
-        let installer = Path::new(r"D:\ClipAnchor\data\updates\ClipAnchor.msi");
+        let installer = Path::new(r"D:\ClipAnchor\data\updates\ClipAnchor_Windows_x64.exe");
         let current_exe = Path::new(r"C:\Program Files\ClipAnchor\clipanchor.exe");
         let log_path = Path::new(r"C:\Program Files\ClipAnchor\data\logs\windows-update.log");
-        let script = windows_installer_script(installer, current_exe, log_path, 1, "0.7.3", None);
+        let script = windows_installer_script(installer, current_exe, log_path, 1, "0.7.5", None);
         assert!(script.contains("$PortableRoot = $null"));
-        assert!(script.contains("Repair-ClipAnchorInstallerSources"));
-        assert!(script.contains("MSINODISABLEMEDIA=1"));
-    }
-
-    #[test]
-    fn installer_compressed_guid_matches_windows_installer_packed_form() {
-        assert_eq!(
-            installer_compressed_guid("{CF324175-2C64-400F-A689-FAFA4072C423}").as_deref(),
-            Some("571423FC46C2F0046A98AFAF04274C32")
-        );
-        assert_eq!(installer_compressed_guid("not-a-guid"), None);
+        assert!(script.contains("/S"));
+        assert!(!script.contains("/D="));
+        assert!(!script.contains("-ElevatedMsiInstall"));
+        assert!(!script.contains("MSINODISABLEMEDIA"));
+        assert!(!script.contains("msiexec"));
+        assert!(!script.contains("SourceList"));
     }
 
     #[test]

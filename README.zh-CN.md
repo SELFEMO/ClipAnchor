@@ -320,7 +320,7 @@ ClipAnchor 会处理用户复制的文本、图片和文件路径。
 
 更新包会自动选择：
 
-- Windows 优先选择 MSI（例如 `ClipAnchor_Windows_x64.msi`），因为静默覆盖安装需要标准参数和退出码；EXE 仍作为兼容兜底。
+- Windows 应用内更新使用 NSIS 安装包 `ClipAnchor_Windows_x64.exe`（`/S`；便携布局再加 `/D=` 装到当前目录）。不再走静默 MSI：残留的 WiX 产品加上缓存 SourceList 会让无人值守 `msiexec` 以 1603 失败。本地仍可打 MSI 供手动安装。`release-v0.7.5` 的 GitHub Release **不要上传 `.msi`**，这样仍偏好 MSI 的 0.7.3/0.7.4 客户端才会改下 EXE。NSIS 更新成功后，若「已安装的应用」里还留着旧的 ClipAnchor 项，不要点卸载——那个 WiX 产品可能会删掉便携目录里的文件。
 - macOS 使用 DMG，并根据文件名过滤架构，Apple Silicon 会选择 ARM64 或 universal 包，不会误选 Intel-only 包；
 - Linux 根据发行版家族选择 DEB 或 RPM。
 
