@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { BadgeCheck, Keyboard, MapPinned, Power, RefreshCw, TriangleAlert } from 'lucide-react';
 import { api } from '../api.js';
 import { detectSystemLanguageCode, getReferenceMessages, inferLanguageLabel, listLanguageChoices, normalizeLocaleCode } from '../i18n.js';
+import { shouldFlushLanguageProgress, yieldLanguagePackFrame } from '../languagePackProgress.js';
 import { formatShortcutForDisplay, normalizeShortcutForStorage } from '../shortcutDisplay.js';
 import { AppearanceSection } from './settings/AppearanceSection.jsx';
 import { DataSection } from './settings/DataSection.jsx';
@@ -658,6 +659,7 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
       if (totalToTranslate) {
         await api.logLanguagePackEvent('translation_api_started', mapTranslationTargetCode(targetCode, effectiveProvider.id), providerName, true, `source en, pack ${targetCode}, ${totalToTranslate} item(s)`).catch(() => {});
         let lastLoggedProgress = 0;
+        let lastProgressFlushAt = 0;
         for (let index = 0; index < translateEntries.length; index += 1) {
           const [key, value, sourceHash] = translateEntries[index];
           const valueTranslated = await translateUiString(value, targetCode, effectiveProvider.id, activeApiKey);
@@ -669,18 +671,23 @@ export default function SettingsPage({ t, boot, onBootChange, updateStatus, onCh
           };
           const current = index + 1;
           const percent = Math.round((current / totalToTranslate) * 100);
-          setLanguageGenerationState({
-            busy: true,
-            message: t('languageProgressLabel').replace('{current}', String(current)).replace('{total}', String(totalToTranslate)),
-            error: false,
-            current,
-            total: totalToTranslate,
-            percent
-          });
+          const now = Date.now();
+          if (shouldFlushLanguageProgress(now, lastProgressFlushAt, current, totalToTranslate)) {
+            lastProgressFlushAt = now;
+            setLanguageGenerationState({
+              busy: true,
+              message: t('languageProgressLabel').replace('{current}', String(current)).replace('{total}', String(totalToTranslate)),
+              error: false,
+              current,
+              total: totalToTranslate,
+              percent
+            });
+          }
           if (percent >= lastLoggedProgress + 25 || current === totalToTranslate) {
             lastLoggedProgress = percent;
             await api.logLanguagePackEvent('translation_progress', mapTranslationTargetCode(targetCode, effectiveProvider.id), providerName, true, `${percent}% (${current}/${totalToTranslate})`).catch(() => {});
           }
+          await yieldLanguagePackFrame();
         }
         await api.logLanguagePackEvent('translation_api_finished', mapTranslationTargetCode(targetCode, effectiveProvider.id), providerName, true, `${totalToTranslate} item(s)`).catch(() => {});
       }

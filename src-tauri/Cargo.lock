@@ -556,7 +556,7 @@ dependencies = [
 
 [[package]]
 name = "clipanchor"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "arboard",
  "base64 0.22.1",

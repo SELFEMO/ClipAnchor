@@ -417,7 +417,30 @@ pub fn log_language_pack_event(
 
 
 #[tauri::command]
-pub fn translate_ui_text(provider: String, target_code: String, text: String, api_key: Option<String>, state: State<'_, AppState>) -> Result<String, String> {
+pub async fn translate_ui_text(
+    provider: String,
+    target_code: String,
+    text: String,
+    api_key: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let app_state = state.inner().clone();
+    // 阻塞 HTTP 放到 worker 线程，避免同步命令占住主线程，设置页滚动和其它 IPC 在生成语言包时仍能响应。
+    // Blocking HTTP runs on a worker thread so a sync command cannot occupy the main thread, keeping settings scroll and other IPC responsive while a language pack is generated.
+    tauri::async_runtime::spawn_blocking(move || {
+        translate_ui_text_blocking(provider, target_code, text, api_key, &app_state)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn translate_ui_text_blocking(
+    provider: String,
+    target_code: String,
+    text: String,
+    api_key: Option<String>,
+    state: &AppState,
+) -> Result<String, String> {
     let normalized_provider = provider.trim().to_ascii_lowercase();
     let normalized_target = normalize_language_code(&target_code);
     if text.trim().is_empty() {
@@ -432,12 +455,12 @@ pub fn translate_ui_text(provider: String, target_code: String, text: String, ap
         .build()
         .map_err(|error| error.to_string())?;
     match normalized_provider.as_str() {
-        "uapis" => translate_with_uapis(&client, &normalized_target, &text, api_key.as_deref().unwrap_or_default(), &state),
-        _ => translate_with_mymemory(&client, &normalized_target, &text, api_key.as_deref().unwrap_or_default(), &state),
+        "uapis" => translate_with_uapis(&client, &normalized_target, &text, api_key.as_deref().unwrap_or_default(), state),
+        _ => translate_with_mymemory(&client, &normalized_target, &text, api_key.as_deref().unwrap_or_default(), state),
     }
 }
 
-fn translate_with_mymemory(client: &reqwest::blocking::Client, target_code: &str, text: &str, api_key: &str, state: &State<'_, AppState>) -> Result<String, String> {
+fn translate_with_mymemory(client: &reqwest::blocking::Client, target_code: &str, text: &str, api_key: &str, state: &AppState) -> Result<String, String> {
     let langpair = format!("en|{}", target_code);
     // 这里不用 RequestBuilder::query，是因为当前 reqwest 版本的 blocking builder 没有暴露该方法；提前构造 URL 可以保持相同请求语义并避免编译失败。
     // RequestBuilder::query is intentionally avoided because the current reqwest blocking builder does not expose it; pre-building the URL keeps the same request semantics and prevents compilation failure.
@@ -481,7 +504,7 @@ fn translate_with_mymemory(client: &reqwest::blocking::Client, target_code: &str
         })
 }
 
-fn translate_with_uapis(client: &reqwest::blocking::Client, target_code: &str, text: &str, api_key: &str, state: &State<'_, AppState>) -> Result<String, String> {
+fn translate_with_uapis(client: &reqwest::blocking::Client, target_code: &str, text: &str, api_key: &str, state: &AppState) -> Result<String, String> {
     let api_key = api_key.trim();
     // UAPI 把目标语言定义为 URL 查询参数，正文只接收 text；严格按该契约发送，避免服务端计数成功但实际没有返回翻译结果。
     // UAPI defines the target locale as a URL query parameter and accepts only text in the JSON body; following that contract prevents counted requests that return no usable translation.
