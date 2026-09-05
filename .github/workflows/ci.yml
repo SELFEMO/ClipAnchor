@@ -9,8 +9,8 @@ jobs:
   rust-test:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - name: Run backend tests
         working-directory: src-tauri
-        run: cargo test
+        run: cargo test --lib

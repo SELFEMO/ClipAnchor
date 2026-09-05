@@ -565,6 +565,7 @@ fn update_asset_cache_name(asset: &GitHubAsset) -> String {
     format!("{:016x}-{}", hash, safe_asset_name(&asset.name))
 }
 
+#[cfg(any(test, target_os = "windows"))]
 fn published_installer_file_name(path: &Path) -> String {
     let name = path
         .file_name()
@@ -715,6 +716,7 @@ fn spawn_silent_child_process(mut command: Command) -> Result<(), String> {
     command.spawn().map(|_| ()).map_err(|error| error.to_string())
 }
 
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn configure_silent_child_process(command: &mut Command) {
     #[cfg(not(target_os = "windows"))]
     {

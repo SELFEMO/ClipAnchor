@@ -59,9 +59,6 @@
           "zh-CN"
         ]
       }
-    },
-    "resources": {
-      "../extension-locales/*": "extension-locales/"
     }
   }
 }
