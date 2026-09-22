@@ -1,8 +1,9 @@
 cask "clipanchor" do
-  version "0.7.5-rebuild"
+  # "<version after v>,<pre-release|release>" — the tag is "#{channel}-v#{version}" and the number after v only increases.
+  version "0.7.5-rebuild,pre-release"
   sha256 "9eefb5eb61070db7e245bb5e14b846385f2fc9e1ccc5eb8d103e1082e0308c40"
 
-  url "https://github.com/SELFEMO/ClipAnchor/releases/download/pre-release-v#{version}/ClipAnchor_macOS_arm64.dmg"
+  url "https://github.com/SELFEMO/ClipAnchor/releases/download/#{version.csv.second}-v#{version.csv.first}/ClipAnchor_macOS_arm64.dmg"
   name "ClipAnchor"
   desc "Portable clipboard pinning tool"
   homepage "https://selfemo.github.io/ClipAnchor/"

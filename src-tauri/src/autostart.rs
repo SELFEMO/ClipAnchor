@@ -243,6 +243,8 @@ const MACOS_LEGACY_LOGIN_HELPER_APP_RELATIVE: &str = "Library/Application Suppor
 const MACOS_LEGACY_LOGIN_ITEM_NAME: &str = "ClipAnchor Login Item";
 #[cfg(target_os = "macos")]
 const MACOS_LOGIN_HELPER_EXECUTABLE: &str = "clipanchor-login-item";
+#[cfg(target_os = "macos")]
+const MACOS_LOGIN_HELPER_ICON: &str = "icon.icns";
 
 #[cfg(target_os = "macos")]
 #[derive(Debug)]
@@ -271,14 +273,13 @@ fn reconcile_macos(enabled_from_settings: bool, root: &Path) -> Result<bool, Str
     }
 
     let login_item_exists = macos_login_item_exists()?;
-    let helper_ready = helper_app.join("Contents/MacOS").join(MACOS_LOGIN_HELPER_EXECUTABLE).is_file();
+    let helper_ready = macos_login_helper_matches_source(&helper_app, root);
     if !login_item_exists || !helper_ready {
-        // 用户开启后每次启动都修复缺失的辅助 app 或 Login Item，是为了防止系统清理、移动安装目录后设置仍显示已开启但实际不执行。
-        // After the user enables autostart, every launch repairs a missing helper app or Login Item so system cleanup or app relocation cannot leave a stale enabled switch.
+        // 用户开启后每次启动都修复缺失的辅助 app、图标或 Login Item，是为了防止系统清理、移动安装目录后设置仍显示已开启但实际不执行。
+        // After the user enables autostart, every launch repairs a missing helper app, icon, or Login Item so system cleanup or app relocation cannot leave a stale enabled switch.
         apply_macos(true, root)?;
     }
-    Ok(macos_login_item_exists()?
-        && helper_app.join("Contents/MacOS").join(MACOS_LOGIN_HELPER_EXECUTABLE).is_file())
+    Ok(macos_login_item_exists()? && macos_login_helper_matches_source(&helper_app, root))
 }
 
 #[cfg(target_os = "macos")]
@@ -408,6 +409,41 @@ fn macos_legacy_login_helper_app_path(home: &str) -> PathBuf {
 }
 
 #[cfg(target_os = "macos")]
+fn macos_bundle_icon_path(bundle: &Path) -> PathBuf {
+    bundle.join("Contents/Resources").join(MACOS_LOGIN_HELPER_ICON)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_login_helper_icon_source(target: &MacosLaunchTarget) -> Option<PathBuf> {
+    let bundle = match target {
+        MacosLaunchTarget::AppBundle(bundle) => bundle.clone(),
+        MacosLaunchTarget::Executable(executable) => find_containing_app_bundle(executable)?,
+    };
+    let icon = macos_bundle_icon_path(&bundle);
+    icon.is_file().then_some(icon)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_login_helper_has_icon(helper_app: &Path) -> bool {
+    helper_app.join("Contents/Resources").join(MACOS_LOGIN_HELPER_ICON).is_file()
+}
+
+#[cfg(target_os = "macos")]
+fn macos_login_helper_matches_source(helper_app: &Path, root: &Path) -> bool {
+    let executable_ready = helper_app
+        .join("Contents/MacOS")
+        .join(MACOS_LOGIN_HELPER_EXECUTABLE)
+        .is_file();
+    if !executable_ready {
+        return false;
+    }
+    let source_has_icon = macos_login_helper_icon_source(&resolve_macos_launch_target(root)).is_some();
+    // 正式应用有图标而辅助包没有时，视为登录项过期，下次启动会重建，避免系统设置继续显示空白图标。
+    // A real app icon with a helper that lacks one marks the login item stale so the next launch rebuilds it instead of leaving a blank tile.
+    !source_has_icon || macos_login_helper_has_icon(helper_app)
+}
+
+#[cfg(target_os = "macos")]
 fn create_macos_login_helper_app(home: &str, target: &MacosLaunchTarget) -> Result<PathBuf, String> {
     let helper_app = macos_login_helper_app_path(home);
     let contents_dir = helper_app.join("Contents");
@@ -418,6 +454,23 @@ fn create_macos_login_helper_app(home: &str, target: &MacosLaunchTarget) -> Resu
     let _ = std::fs::remove_dir_all(&helper_app);
     std::fs::create_dir_all(&macos_dir).map_err(|error| error.to_string())?;
     std::fs::create_dir_all(&resources_dir).map_err(|error| error.to_string())?;
+
+    let copied_icon = if let Some(source) = macos_login_helper_icon_source(target) {
+        // 系统设置显示的是登录项自己的 .app 图标；把正式应用的 icns 放进辅助包，空白方块才会变成 ClipAnchor 图标。
+        // System Settings shows the login item's own .app icon; copying the real app icns into the helper replaces the blank tile.
+        std::fs::copy(&source, resources_dir.join(MACOS_LOGIN_HELPER_ICON)).map_err(|error| error.to_string())?;
+        true
+    } else {
+        false
+    };
+    let icon_plist = if copied_icon {
+        format!(
+            "  <key>CFBundleIconFile</key>\n  <string>{}</string>\n",
+            escape_xml(MACOS_LOGIN_HELPER_ICON)
+        )
+    } else {
+        String::new()
+    };
 
     let plist = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -430,7 +483,7 @@ fn create_macos_login_helper_app(home: &str, target: &MacosLaunchTarget) -> Resu
   <string>{}</string>
   <key>CFBundleExecutable</key>
   <string>{}</string>
-  <key>CFBundleIdentifier</key>
+{icon_plist}  <key>CFBundleIdentifier</key>
   <string>com.clipanchor.desktop.loginitem</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
@@ -451,7 +504,8 @@ fn create_macos_login_helper_app(home: &str, target: &MacosLaunchTarget) -> Resu
 "#,
         escape_xml(MACOS_LOGIN_ITEM_NAME),
         escape_xml(MACOS_LOGIN_HELPER_EXECUTABLE),
-        escape_xml(MACOS_LOGIN_ITEM_NAME)
+        escape_xml(MACOS_LOGIN_ITEM_NAME),
+        icon_plist = icon_plist,
     );
     std::fs::write(contents_dir.join("Info.plist"), plist).map_err(|error| error.to_string())?;
 
@@ -922,5 +976,88 @@ fn linux_paths_equal(left: &Path, right: &Path) -> bool {
         == right
             .canonicalize()
             .unwrap_or_else(|_| right.to_path_buf())
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::{
+        create_macos_login_helper_app, macos_login_helper_icon_source, MacosLaunchTarget,
+    };
+    use std::{fs, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
+
+    fn temp_root(label: &str) -> PathBuf {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("clipanchor-login-icon-{label}-{nanos}"));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn write_app_bundle(root: &std::path::Path, with_icon: bool) -> PathBuf {
+        let bundle = root.join("ClipAnchor.app");
+        fs::create_dir_all(bundle.join("Contents/MacOS")).unwrap();
+        fs::create_dir_all(bundle.join("Contents/Resources")).unwrap();
+        fs::write(bundle.join("Contents/Info.plist"), b"plist").unwrap();
+        fs::write(bundle.join("Contents/MacOS/clipanchor"), b"bin").unwrap();
+        if with_icon {
+            fs::write(bundle.join("Contents/Resources/icon.icns"), b"icns").unwrap();
+        }
+        bundle
+    }
+
+    #[test]
+    fn login_helper_icon_comes_from_the_real_app_bundle() {
+        let root = temp_root("source");
+        let bundle = write_app_bundle(&root, true);
+        let icon = bundle.join("Contents/Resources/icon.icns");
+
+        let from_bundle = macos_login_helper_icon_source(&MacosLaunchTarget::AppBundle(bundle.clone()));
+        assert_eq!(from_bundle.as_deref(), Some(icon.as_path()));
+
+        let from_executable = macos_login_helper_icon_source(&MacosLaunchTarget::Executable(
+            bundle.join("Contents/MacOS/clipanchor"),
+        ));
+        assert_eq!(from_executable.as_deref(), Some(icon.as_path()));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn login_helper_copies_icon_and_declares_it() {
+        let root = temp_root("copy");
+        let bundle = write_app_bundle(&root, true);
+        let home = root.join("home");
+        let helper = create_macos_login_helper_app(
+            home.to_str().unwrap(),
+            &MacosLaunchTarget::AppBundle(bundle),
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read(helper.join("Contents/Resources/icon.icns")).unwrap(),
+            b"icns"
+        );
+        let plist = fs::read_to_string(helper.join("Contents/Info.plist")).unwrap();
+        assert!(plist.contains("<key>CFBundleIconFile</key>"));
+        assert!(plist.contains("<string>icon.icns</string>"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn login_helper_without_a_real_icon_is_still_created() {
+        let root = temp_root("missing");
+        let bundle = write_app_bundle(&root, false);
+        assert!(macos_login_helper_icon_source(&MacosLaunchTarget::AppBundle(bundle.clone())).is_none());
+
+        let home = root.join("home");
+        let helper = create_macos_login_helper_app(
+            home.to_str().unwrap(),
+            &MacosLaunchTarget::AppBundle(bundle),
+        )
+        .unwrap();
+        let plist = fs::read_to_string(helper.join("Contents/Info.plist")).unwrap();
+        assert!(!plist.contains("CFBundleIconFile"));
+        assert!(helper.join("Contents/MacOS/clipanchor-login-item").is_file());
+        let _ = fs::remove_dir_all(root);
+    }
 }
 
