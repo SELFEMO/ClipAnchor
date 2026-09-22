@@ -66,6 +66,24 @@ Published installers and portable archives are available on the [Releases](https
 3. Install the package or extract the portable archive.
 4. Start ClipAnchor and configure privacy filtering, appearance, language, cleanup behavior, and shortcuts where supported.
 
+Apple Silicon and 64-bit Linux can install the published packages with Homebrew:
+
+Apple Silicon:
+
+```bash
+brew tap SELFEMO/clipanchor https://github.com/SELFEMO/ClipAnchor.git
+brew install --cask clipanchor
+```
+
+Linux x86_64:
+
+```bash
+brew tap SELFEMO/clipanchor https://github.com/SELFEMO/ClipAnchor.git
+brew install clipanchor
+```
+
+The Linux package needs the distribution libraries `libwebkit2gtk-4.1-0`, `libgtk-3-0`, and `libayatana-appindicator3-1`, or their equivalents. Intel Mac and Linux arm64 packages are not published.
+
 When no compatible package is available, build ClipAnchor from source. Back up important files under `data/` before upgrading or replacing a portable installation.
 
 ## Quick start

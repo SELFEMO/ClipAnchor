@@ -193,6 +193,7 @@
     .download-head { max-width: 920px; min-width: 0; }
     .download-body { display: grid; grid-template-columns: minmax(0, 1fr) 210px; gap: 18px; align-items: stretch; }
     .artifact-list { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 0; min-width: 0; }
+    .brew-install { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
     .download-side { display: flex; flex-direction: column; gap: 12px; align-items: stretch; align-self: stretch; min-width: 0; }
     .download-side .btn { width: 100%; min-height: 48px; }
     .download-status { display: inline-flex; align-items: center; gap: 9px; margin-top: 18px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 999px; background: color-mix(in srgb, var(--card-strong), transparent 8%); color: var(--muted); font-size: 13px; font-weight: 850; }
@@ -373,6 +374,7 @@
           <span class="pill">Linux · DEB / RPM</span>
           <span class="pill" data-i18n="cliVersion">CLI: --version / -V</span>
         </div>
+        <p class="muted brew-install" data-i18n="homebrewInstall">Homebrew — Apple Silicon: brew tap SELFEMO/clipanchor https://github.com/SELFEMO/ClipAnchor.git &amp;&amp; brew install --cask clipanchor. Linux x86_64: brew install clipanchor.</p>
       </div>
     </section>
 
@@ -410,6 +412,7 @@
         p2Title: 'Rotated runtime logs', p2Body: 'Logs record service, tray, popup, shortcut, data, and error events. Clipboard body text is not written to logs.',
         p3Title: 'One running instance', p3Body: 'Starting ClipAnchor again activates the existing main window instead of leaving another long-running process.',
         downloadTitle: 'Download the right package automatically.', downloadBody: 'The page detects your desktop platform and selects the most suitable package from the official GitHub Releases. You can still choose another installer from the release list below.',
+        homebrewInstall: 'Homebrew — Apple Silicon: brew tap SELFEMO/clipanchor https://github.com/SELFEMO/ClipAnchor.git && brew install --cask clipanchor. Linux x86_64: brew install clipanchor.',
         downloadStatusLoading: 'Finding the latest package…', downloadStatusReady: 'Recommended package is ready', downloadStatusFallback: 'Open GitHub Releases to choose a package',
         recommendedLabel: 'Recommended download', recommendedPending: 'Preparing download options', recommendedMetaPending: 'Release information will appear here automatically.',
         downloadRecommended: 'Download package', downloadOpenReleases: 'Open releases', allDownloads: 'All downloads', sourceCode: 'Source code',
@@ -444,6 +447,7 @@
         p2Title: '轮转运行日志', p2Body: '日志记录服务、托盘、弹窗、快捷键、数据和错误事件，不写入剪贴板正文。',
         p3Title: '单实例运行', p3Body: '再次启动 ClipAnchor 会激活已有主窗口，不会留下第二个长期运行进程。',
         downloadTitle: '自动选择适合你的安装包。', downloadBody: '网页会识别当前桌面平台，并从官方 GitHub Releases 中选择最合适的安装包。你也可以在下方列表中手动选择其他安装包。',
+        homebrewInstall: 'Homebrew — Apple Silicon：brew tap SELFEMO/clipanchor https://github.com/SELFEMO/ClipAnchor.git && brew install --cask clipanchor。Linux x86_64：brew install clipanchor。',
         downloadStatusLoading: '正在查找最新安装包…', downloadStatusReady: '推荐安装包已准备好', downloadStatusFallback: '请打开 GitHub Releases 选择安装包',
         recommendedLabel: '推荐下载', recommendedPending: '正在准备下载选项', recommendedMetaPending: '发布信息会自动显示在这里。',
         downloadRecommended: '下载安装包', downloadOpenReleases: '打开发布页', allDownloads: '全部下载', sourceCode: '源代码',

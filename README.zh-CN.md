@@ -66,6 +66,24 @@ ClipAnchor 的核心目标是 **“便携”** 和 **“安静”**。运行数�
 3. 安装软件或解压便携包。
 4. 启动 ClipAnchor，并在设置中配置隐私过滤、外观、语言、数据清理策略，以及受支持平台的快捷键。
 
+Apple Silicon 和 64 位 Linux 可以用 Homebrew 安装已发布的安装包：
+
+Apple Silicon：
+
+```bash
+brew tap SELFEMO/clipanchor https://github.com/SELFEMO/ClipAnchor.git
+brew install --cask clipanchor
+```
+
+Linux x86_64：
+
+```bash
+brew tap SELFEMO/clipanchor https://github.com/SELFEMO/ClipAnchor.git
+brew install clipanchor
+```
+
+Linux 安装包需要发行版提供 `libwebkit2gtk-4.1-0`、`libgtk-3-0` 和 `libayatana-appindicator3-1`，或对应的等价库。Intel Mac 和 Linux arm64 没有发布安装包。
+
 若当前平台没有可用安装包，请从源码构建。升级或替换便携版前，建议先备份 `data/` 目录中的重要文件。
 
 ## 快速开始

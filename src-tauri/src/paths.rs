@@ -46,29 +46,50 @@ fn resolve_data_dir(root: &Path) -> Result<PathBuf, String> {
 
 #[cfg(target_os = "linux")]
 fn resolve_data_dir(root: &Path) -> Result<PathBuf, String> {
-    if portable_mode_requested() {
-        // 用户明确要求便携模式时必须坚持软件同级 data 目录，即使系统包安装目录不可写也应暴露真实错误。
-        // An explicit portable request must keep data beside the app, even if a system package directory is not writable, so the real permission issue is visible.
-        return Ok(root.join("data"));
+    let sibling = root.join("data");
+    let portable = portable_mode_requested();
+    let custom = env::var("CLIPANCHOR_DATA_DIR").ok();
+    if portable || explicit_linux_data_dir(custom.as_deref()).is_some() {
+        // 便携模式和显式数据目录都不探测同级目录是否可写，避免 Homebrew Cellar 里被提前创建出会被升级删除的 data。
+        // Portable mode and an explicit data directory skip the sibling writability probe so Homebrew does not create a Cellar data folder that upgrades delete.
+        return Ok(select_linux_data_dir(portable, custom.as_deref(), &sibling, false, PathBuf::new()));
     }
 
-    let portable_data = root.join("data");
-    if directory_is_writable(&portable_data) {
+    if directory_is_writable(&sibling) {
         // 开发环境和解压式 Linux 包通常位于用户可写目录；优先使用同级 data 才能保留真正的便携体验。
         // Development and unpacked Linux builds usually live in writable user folders, so the sibling data directory remains the first choice for portability.
-        return Ok(portable_data);
-    }
-
-    if let Ok(custom) = env::var("CLIPANCHOR_DATA_DIR") {
-        let trimmed = custom.trim();
-        if !trimmed.is_empty() {
-            return Ok(PathBuf::from(trimmed));
-        }
+        return Ok(select_linux_data_dir(false, None, &sibling, true, PathBuf::new()));
     }
 
     // deb/rpm 安装后的可执行文件通常位于 /usr/bin 或 /usr/lib，普通用户无法写入同级 data；回退到用户数据目录可避免 SQLite/settings 初始化失败。
     // After deb/rpm installation the executable usually lives under /usr/bin or /usr/lib, where normal users cannot write sibling data; falling back prevents SQLite/settings startup failures.
-    linux_user_data_dir()
+    Ok(select_linux_data_dir(false, None, &sibling, false, linux_user_data_dir()?))
+}
+
+fn explicit_linux_data_dir(value: Option<&str>) -> Option<PathBuf> {
+    let trimmed = value?.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(trimmed))
+    }
+}
+
+fn select_linux_data_dir(portable: bool, custom_dir: Option<&str>, sibling: &Path, sibling_writable: bool, user_data: PathBuf) -> PathBuf {
+    if portable {
+        // 用户明确要求便携模式时必须坚持软件同级 data 目录，即使系统包安装目录不可写也应暴露真实错误。
+        // An explicit portable request must keep data beside the app, even if a system package directory is not writable, so the real permission issue is visible.
+        return sibling.to_path_buf();
+    }
+    if let Some(path) = explicit_linux_data_dir(custom_dir) {
+        // Homebrew 启动脚本会设置 CLIPANCHOR_DATA_DIR。Cellar 对安装用户可写，必须让这个目录压过同级 data，升级才不会丢掉数据库。
+        // The Homebrew launcher sets CLIPANCHOR_DATA_DIR. The Cellar is writable for the installing user, so this directory must win over sibling data or upgrades delete the database.
+        return path;
+    }
+    if sibling_writable {
+        return sibling.to_path_buf();
+    }
+    user_data
 }
 
 #[cfg(target_os = "linux")]
@@ -378,4 +399,40 @@ pub fn ensure(paths: &DataPaths) -> Result<(), String> {
         fs::create_dir_all(path).map_err(|error| error.to_string())?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::select_linux_data_dir;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn linux_portable_mode_keeps_sibling_data_dir() {
+        let chosen = select_linux_data_dir(true, Some("/custom"), Path::new("/app/data"), true, PathBuf::from("/home/data"));
+        assert_eq!(chosen, PathBuf::from("/app/data"));
+    }
+
+    #[test]
+    fn linux_custom_data_dir_precedes_writable_sibling() {
+        let chosen = select_linux_data_dir(false, Some("  /custom/clip  "), Path::new("/app/data"), true, PathBuf::from("/home/data"));
+        assert_eq!(chosen, PathBuf::from("/custom/clip"));
+    }
+
+    #[test]
+    fn linux_blank_custom_data_dir_uses_writable_sibling() {
+        let chosen = select_linux_data_dir(false, Some("   "), Path::new("/app/data"), true, PathBuf::from("/home/data"));
+        assert_eq!(chosen, PathBuf::from("/app/data"));
+    }
+
+    #[test]
+    fn linux_unwritable_sibling_uses_user_data_dir() {
+        let chosen = select_linux_data_dir(
+            false,
+            None,
+            Path::new("/usr/bin/data"),
+            false,
+            PathBuf::from("/home/.local/share/ClipAnchor/data"),
+        );
+        assert_eq!(chosen, PathBuf::from("/home/.local/share/ClipAnchor/data"));
+    }
 }
