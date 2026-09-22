@@ -12,6 +12,12 @@ cask "clipanchor" do
 
   app "ClipAnchor.app"
 
+  postflight_steps do
+    run "/usr/bin/xattr",
+        args:         ["-dr", "com.apple.quarantine", "{{appdir}}/ClipAnchor.app"],
+        must_succeed: false
+  end
+
   zap trash: [
     "~/Library/Application Support/ClipAnchor",
     "~/Library/LaunchAgents/com.clipanchor.desktop.plist",

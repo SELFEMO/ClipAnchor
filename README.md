@@ -72,6 +72,7 @@ Apple Silicon:
 
 ```bash
 brew tap SELFEMO/clipanchor https://github.com/SELFEMO/ClipAnchor.git
+brew trust selfemo/clipanchor
 brew install --cask clipanchor
 ```
 
@@ -79,10 +80,17 @@ Linux x86_64:
 
 ```bash
 brew tap SELFEMO/clipanchor https://github.com/SELFEMO/ClipAnchor.git
+brew trust selfemo/clipanchor
 brew install clipanchor
 ```
 
 The Linux package needs the distribution libraries `libwebkit2gtk-4.1-0`, `libgtk-3-0`, and `libayatana-appindicator3-1`, or their equivalents. Intel Mac and Linux arm64 packages are not published.
+
+The published macOS package is not notarized. The cask removes the download quarantine attribute after installation. If macOS still reports that ClipAnchor.app is damaged, run:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/ClipAnchor.app
+```
 
 When no compatible package is available, build ClipAnchor from source. Back up important files under `data/` before upgrading or replacing a portable installation.
 
