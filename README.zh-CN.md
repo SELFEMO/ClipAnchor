@@ -92,6 +92,22 @@ Linux 安装包需要发行版提供 `libwebkit2gtk-4.1-0`、`libgtk-3-0` 和 `l
 xattr -dr com.apple.quarantine /Applications/ClipAnchor.app
 ```
 
+Windows 可以用一条命令安装 NSIS 安装包。安装包文件名保持 `ClipAnchor_Windows_x64.exe`。命令会在 `pre-release-v` 和 `release-v` 标签里选择版本号最高的发布，并静默安装到指定目录。如果版本查询失败，则用同一个文件名从最新发布下载。
+
+PowerShell：
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/SELFEMO/ClipAnchor/main/scripts/install-windows.ps1))) -Destination 'D:\ClipAnchor' -Package 'ClipAnchor_Windows_x64.exe'
+```
+
+命令提示符：
+
+```cmd
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm https://raw.githubusercontent.com/SELFEMO/ClipAnchor/main/scripts/install-windows.ps1))) -Destination 'D:\ClipAnchor' -Package 'ClipAnchor_Windows_x64.exe'"
+```
+
+`-Package` 可以省略，默认就是 `ClipAnchor_Windows_x64.exe`。换成其他已发布的文件名时，仍会在同一个最新 Release 里查找。这条命令要等脚本进入 `main` 分支后才能从上面的地址运行。
+
 若当前平台没有可用安装包，请从源码构建。升级或替换便携版前，建议先备份 `data/` 目录中的重要文件。
 
 ## 快速开始

@@ -92,6 +92,22 @@ The published macOS package is not notarized. The cask removes the download quar
 xattr -dr com.apple.quarantine /Applications/ClipAnchor.app
 ```
 
+Windows can install the NSIS package with one command. The package name stays `ClipAnchor_Windows_x64.exe`. The command selects the `pre-release-v` or `release-v` tag with the highest version number and installs silently into the directory you choose. If the release lookup fails, it downloads that same file name from the latest release.
+
+PowerShell:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/SELFEMO/ClipAnchor/main/scripts/install-windows.ps1))) -Destination 'D:\ClipAnchor' -Package 'ClipAnchor_Windows_x64.exe'
+```
+
+Command Prompt:
+
+```cmd
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm https://raw.githubusercontent.com/SELFEMO/ClipAnchor/main/scripts/install-windows.ps1))) -Destination 'D:\ClipAnchor' -Package 'ClipAnchor_Windows_x64.exe'"
+```
+
+`-Package` can be omitted. It defaults to `ClipAnchor_Windows_x64.exe`. Another published file name is looked up in that same newest release. This command works after the script is on the `main` branch.
+
 When no compatible package is available, build ClipAnchor from source. Back up important files under `data/` before upgrading or replacing a portable installation.
 
 ## Quick start

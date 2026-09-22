@@ -66,6 +66,7 @@ fn resolve_data_dir(root: &Path) -> Result<PathBuf, String> {
     Ok(select_linux_data_dir(false, None, &sibling, false, linux_user_data_dir()?))
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn explicit_linux_data_dir(value: Option<&str>) -> Option<PathBuf> {
     let trimmed = value?.trim();
     if trimmed.is_empty() {
@@ -75,6 +76,7 @@ fn explicit_linux_data_dir(value: Option<&str>) -> Option<PathBuf> {
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn select_linux_data_dir(portable: bool, custom_dir: Option<&str>, sibling: &Path, sibling_writable: bool, user_data: PathBuf) -> PathBuf {
     if portable {
         // 用户明确要求便携模式时必须坚持软件同级 data 目录，即使系统包安装目录不可写也应暴露真实错误。
