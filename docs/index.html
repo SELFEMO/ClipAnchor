@@ -571,6 +571,54 @@
 
     const releaseApiUrl = 'https://api.github.com/repos/SELFEMO/ClipAnchor/releases';
     const releasesPageUrl = 'https://github.com/SELFEMO/ClipAnchor/releases';
+    const latestDownloadBaseUrl = 'https://github.com/SELFEMO/ClipAnchor/releases/latest/download';
+    const releaseCacheKey = 'clipanchor-docs-releases';
+    const releaseCacheTtlMs = 10 * 60 * 1000;
+    const directDownloadFileNames = [
+      'ClipAnchor_Windows_x64.exe',
+      'ClipAnchor_macOS_arm64.dmg',
+      'ClipAnchor_Linux_x64.deb',
+      'ClipAnchor_Linux_x64.rpm',
+    ];
+
+    let cachedRelease = null;
+    let cachedPlatform = null;
+
+    function directDownloadUrl(fileName) {
+      return `${latestDownloadBaseUrl}/${encodeURIComponent(fileName)}`;
+    }
+
+    function buildDirectDownloadAsset(fileName) {
+      return { name: fileName, browser_download_url: directDownloadUrl(fileName), direct: true };
+    }
+
+    function getDirectDownloadArtifacts() {
+      return directDownloadFileNames.map((fileName) => buildDirectDownloadAsset(fileName));
+    }
+
+    function readCachedReleases() {
+      try {
+        const raw = sessionStorage.getItem(releaseCacheKey);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed?.expiresAt || Date.now() > parsed.expiresAt || !Array.isArray(parsed.releases)) return null;
+        return parsed.releases;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function writeCachedReleases(releases) {
+      try {
+        sessionStorage.setItem(releaseCacheKey, JSON.stringify({
+          expiresAt: Date.now() + releaseCacheTtlMs,
+          releases,
+        }));
+      } catch (_) {
+        // 静态文档在 file:// 或隐私模式中可能无法写入 sessionStorage；忽略后仍可走 latest/download 直链。
+        // Static docs may not write sessionStorage under file:// or private mode; direct latest/download links still work.
+      }
+    }
 
     function releaseVersionParts(tagName) {
       const match = String(tagName || '').match(/(?:pre-release|release)-v(\d+(?:\.\d+){0,3})/i);
@@ -597,6 +645,22 @@
       })[0] || releases.find((release) => !release.draft);
     }
 
+    function detectMacArchitectureFromWebGl() {
+      try {
+        const canvas = document.createElement('canvas');
+        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        if (!gl) return 'unknown';
+        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+        if (!debugInfo) return 'unknown';
+        const renderer = String(gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || '').toLowerCase();
+        if (/apple m|apple gpu/.test(renderer)) return 'arm64';
+        if (/intel/.test(renderer)) return 'x64';
+        return 'unknown';
+      } catch (_) {
+        return 'unknown';
+      }
+    }
+
     async function getPlatformInfo() {
       const userAgent = navigator.userAgent || '';
       const platformText = `${navigator.userAgentData?.platform || ''} ${navigator.platform || ''} ${userAgent}`.toLowerCase();
@@ -605,7 +669,10 @@
       else if (/macintosh|mac os|darwin/.test(platformText)) os = 'macos';
       else if (/linux|x11/.test(platformText)) os = 'linux';
 
-      let architecture = /arm64|aarch64/.test(platformText) ? 'arm64' : 'x64';
+      let architecture = 'unknown';
+      if (/arm64|aarch64/.test(platformText)) architecture = 'arm64';
+      else if (/win64|wow64|x86_64|amd64/.test(platformText)) architecture = 'x64';
+
       if (navigator.userAgentData?.getHighEntropyValues) {
         try {
           const highEntropy = await navigator.userAgentData.getHighEntropyValues(['architecture', 'bitness']);
@@ -617,13 +684,45 @@
           // Some browsers do not expose high-entropy platform data, so the basic detection keeps downloads usable.
         }
       }
+
+      if (os === 'macos' && architecture === 'unknown') {
+        architecture = detectMacArchitectureFromWebGl();
+      }
+      if (os === 'macos' && architecture === 'unknown') {
+        // 仓库只发布 arm64 DMG；MacIntel 兼容 UA 不能当成 Intel CPU，未知时默认推荐 arm64 包。
+        // The repository ships arm64 DMG only; MacIntel compatibility UA must not imply Intel CPU, so unknown macOS defaults to arm64.
+        architecture = 'arm64';
+      }
+      if ((os === 'windows' || os === 'linux') && architecture === 'unknown') {
+        architecture = 'x64';
+      }
+
       return { os, architecture, language: currentLang === 'zh' ? 'zh-CN' : 'en-US' };
+    }
+
+    function selectDirectRecommendedAsset(platform) {
+      if (platform.os === 'windows') {
+        if (platform.architecture === 'arm64') return null;
+        return buildDirectDownloadAsset('ClipAnchor_Windows_x64.exe');
+      }
+      if (platform.os === 'macos') {
+        if (platform.architecture === 'x64') return null;
+        return buildDirectDownloadAsset('ClipAnchor_macOS_arm64.dmg');
+      }
+      if (platform.os === 'linux') {
+        if (platform.architecture === 'arm64') return null;
+        return buildDirectDownloadAsset('ClipAnchor_Linux_x64.deb');
+      }
+      return null;
     }
 
     function assetMatchesArchitecture(name, architecture) {
       const lower = name.toLowerCase();
       if (architecture === 'arm64') return /arm64|aarch64/.test(lower);
-      return !/arm64|aarch64/.test(lower) && (/x64|x86_64|amd64|windows|macos|linux/.test(lower));
+      if (architecture === 'x64') {
+        return !/arm64|aarch64/.test(lower) && (/x64|x86_64|amd64|windows|macos|linux/.test(lower));
+      }
+      return true;
     }
 
     function rankAsset(asset, platform) {
@@ -668,7 +767,13 @@
 
     function formatPlatform(platform) {
       const osNames = { windows: 'Windows', macos: 'macOS', linux: 'Linux', unknown: currentLang === 'zh' ? '当前设备' : 'this device' };
-      return `${osNames[platform.os] || osNames.unknown} ${platform.architecture}`;
+      const archNames = { arm64: 'arm64', x64: 'x64', unknown: currentLang === 'zh' ? '未知架构' : 'unknown arch' };
+      return `${osNames[platform.os] || osNames.unknown} ${archNames[platform.architecture] || platform.architecture}`;
+    }
+
+    function resolveRecommendedAsset(release, platform, directAsset) {
+      const apiAsset = release ? selectRecommendedAsset(release.assets || [], platform) : null;
+      return apiAsset || directAsset || null;
     }
 
     function updateDownloadStatus(key) {
@@ -677,30 +782,7 @@
       if (statusText) statusText.textContent = dict[key] || dict.downloadStatusFallback;
     }
 
-    function renderDownloadPanel(release, platform, recommendedAsset) {
-      const dict = translations[currentLang];
-      const title = document.getElementById('recommendedTitle');
-      const meta = document.getElementById('recommendedMeta');
-      const primary = document.getElementById('primaryDownloadButton');
-      const list = document.getElementById('downloadArtifactList');
-      const releaseUrl = release?.html_url || releasesPageUrl;
-      document.getElementById('allDownloadsButton').href = releaseUrl;
-
-      if (recommendedAsset) {
-        title.textContent = recommendedAsset.name;
-        meta.textContent = `${dict.latestReleaseLabel}: ${release.name || release.tag_name} · ${dict.platformLabel}: ${formatPlatform(platform)}`;
-        primary.href = recommendedAsset.browser_download_url;
-        primary.textContent = dict.downloadRecommended;
-        updateDownloadStatus('downloadStatusReady');
-      } else {
-        title.textContent = dict.noCompatiblePackage;
-        meta.textContent = `${dict.latestReleaseLabel}: ${release?.name || release?.tag_name || 'GitHub Releases'} · ${dict.platformLabel}: ${formatPlatform(platform)}`;
-        primary.href = releaseUrl;
-        primary.textContent = dict.downloadOpenReleases;
-        updateDownloadStatus('downloadStatusFallback');
-      }
-
-      const assets = (release?.assets || []).filter((asset) => /\.(exe|msi|dmg|deb|rpm|zip|tar\.gz|tgz)$/i.test(asset.name || ''));
+    function renderArtifactLinks(list, assets) {
       list.innerHTML = '';
       assets.slice(0, 8).forEach((asset) => {
         const link = document.createElement('a');
@@ -713,29 +795,66 @@
         link.appendChild(label);
         list.appendChild(link);
       });
-      if (!assets.length) {
-        ['Windows · EXE / MSI', 'macOS · DMG', 'Linux · DEB / RPM', dict.cliVersion].forEach((item) => {
-          const pill = document.createElement('span');
-          pill.className = 'pill';
-          pill.textContent = item;
-          list.appendChild(pill);
-        });
+    }
+
+    function renderDownloadPanel(release, platform, recommendedAsset) {
+      const dict = translations[currentLang];
+      const title = document.getElementById('recommendedTitle');
+      const meta = document.getElementById('recommendedMeta');
+      const primary = document.getElementById('primaryDownloadButton');
+      const list = document.getElementById('downloadArtifactList');
+      const releaseUrl = release?.html_url || releasesPageUrl;
+      document.getElementById('allDownloadsButton').href = releaseUrl;
+      const releaseLabel = release?.name || release?.tag_name || 'GitHub Releases';
+
+      if (recommendedAsset) {
+        title.textContent = recommendedAsset.name;
+        meta.textContent = `${dict.latestReleaseLabel}: ${releaseLabel} · ${dict.platformLabel}: ${formatPlatform(platform)}`;
+        primary.href = recommendedAsset.browser_download_url;
+        primary.textContent = dict.downloadRecommended;
+        updateDownloadStatus('downloadStatusReady');
+      } else {
+        title.textContent = dict.noCompatiblePackage;
+        meta.textContent = `${dict.latestReleaseLabel}: ${releaseLabel} · ${dict.platformLabel}: ${formatPlatform(platform)}`;
+        primary.href = releaseUrl;
+        primary.textContent = dict.downloadOpenReleases;
+        updateDownloadStatus('downloadStatusFallback');
       }
+
+      const apiAssets = (release?.assets || []).filter((asset) => /\.(exe|msi|dmg|deb|rpm|zip|tar\.gz|tgz)$/i.test(asset.name || ''));
+      renderArtifactLinks(list, apiAssets.length ? apiAssets : getDirectDownloadArtifacts());
+    }
+
+    function renderDownloadPanelFromState() {
+      if (!cachedPlatform) return;
+      cachedPlatform.language = currentLang === 'zh' ? 'zh-CN' : 'en-US';
+      const directAsset = selectDirectRecommendedAsset(cachedPlatform);
+      renderDownloadPanel(cachedRelease, cachedPlatform, resolveRecommendedAsset(cachedRelease, cachedPlatform, directAsset));
     }
 
     async function initializeDownloadPanel() {
-      const platform = await getPlatformInfo();
+      cachedPlatform = await getPlatformInfo();
+      const directAsset = selectDirectRecommendedAsset(cachedPlatform);
+      renderDownloadPanel(null, cachedPlatform, directAsset);
+
+      const cachedReleases = readCachedReleases();
+      if (cachedReleases) {
+        cachedRelease = pickDisplayRelease(cachedReleases);
+        renderDownloadPanelFromState();
+        return;
+      }
+
       try {
         const response = await fetch(releaseApiUrl, { headers: { Accept: 'application/vnd.github+json' } });
         if (!response.ok) throw new Error('Release request failed');
         const releases = await response.json();
-        const release = pickDisplayRelease(Array.isArray(releases) ? releases : []);
-        const recommendedAsset = release ? selectRecommendedAsset(release.assets || [], platform) : null;
-        renderDownloadPanel(release, platform, recommendedAsset);
+        if (!Array.isArray(releases)) throw new Error('Release response invalid');
+        writeCachedReleases(releases);
+        cachedRelease = pickDisplayRelease(releases);
+        renderDownloadPanelFromState();
       } catch (_) {
-        // 官网是静态页面，网络或 API 限流失败时保留发布页入口，避免用户被卡在无下载状态。
-        // The website is static, so release-page fallback prevents users from being blocked by network or API limits.
-        renderDownloadPanel(null, platform, null);
+        // API 限流或网络失败时保留 latest/download 直链推荐，不再把失败渲染成“没有安装包”。
+        // When the API is rate-limited or unreachable, keep the latest/download recommendation instead of showing no package.
       }
     }
 
@@ -747,7 +866,7 @@
     if (langButton) {
       langButton.addEventListener('click', () => {
         applyLanguage(currentLang === 'zh' ? 'en' : 'zh');
-        initializeDownloadPanel();
+        renderDownloadPanelFromState();
       });
     }
     const themeButton = document.getElementById('themeButton');
