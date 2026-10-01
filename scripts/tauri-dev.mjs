@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, readdir, stat, utimes, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { resolveNodeBinary } from './node-tool.mjs';
-import { ensureCargoLock, ensureRustToolchain } from './toolchain.mjs';
+import { ensureCargoLock, ensureLinuxBuildDependencies, ensureRustToolchain } from './toolchain.mjs';
 import { syncNpmPackageVersion } from './app-version.mjs';
 
 const host = '127.0.0.1';
@@ -153,6 +153,7 @@ async function main() {
   }
 
   ensureRustToolchain();
+  ensureLinuxBuildDependencies();
   ensureCargoLock();
   syncNpmPackageVersion();
   await ensureRustSourcesTriggerRebuild();

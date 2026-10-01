@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveNodeBinary } from './node-tool.mjs';
-import { ensureCargoLock, ensureRustToolchain } from './toolchain.mjs';
+import { ensureCargoLock, ensureLinuxBuildDependencies, ensureRustToolchain } from './toolchain.mjs';
 import { syncNpmPackageVersion } from './app-version.mjs';
 
 function main() {
@@ -15,6 +15,8 @@ function main() {
   const isMacTarget = process.platform === 'darwin' || normalizedTarget.includes('apple-darwin');
   const isWindowsTarget = process.platform === 'win32' || normalizedTarget.includes('windows');
   const isLinuxTarget = process.platform === 'linux' || normalizedTarget.includes('linux');
+  const hostLinuxBuild = process.platform === 'linux' && (!targetTriple || normalizedTarget.includes('linux'));
+  if (hostLinuxBuild) ensureLinuxBuildDependencies();
   const cargoLockPath = join(process.cwd(), 'src-tauri', 'Cargo.lock');
 
   if (!existsSync(cargoLockPath)) {
